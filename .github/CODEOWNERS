@@ -1,0 +1,13 @@
+# Code Owners
+#
+# The public Community Edition is maintained by the project maintainers.
+# Adjust these handles to match your organization's teams as they are set up.
+* @Clarity-Point/maintainers
+
+# Safety, privacy and dependency changes require maintainer review.
+/backend/src/controllers/aiController.ts @Clarity-Point/maintainers
+/backend/src/services/crisisService.ts   @Clarity-Point/maintainers
+/backend/src/middleware/auth.ts          @Clarity-Point/maintainers
+/backend/prisma/                         @Clarity-Point/maintainers
+/.github/                                @Clarity-Point/maintainers
+/SECURITY.md                             @Clarity-Point/maintainers

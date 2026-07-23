@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-ssr/
+build/
+coverage/
+package-lock.json
+backend/prisma/migrations/
+**/*.min.js
+frontend/public/
+frontend/src/assets/

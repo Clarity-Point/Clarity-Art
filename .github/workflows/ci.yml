@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Prisma reads this for `generate`; no real database is contacted in CI.
+      DATABASE_URL: postgresql://user:password@localhost:5432/tochka_yasnosti?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace backend
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Backend type-check
+        run: npx tsc --noEmit
+        working-directory: ./backend
+
+      - name: Backend tests
+        run: npm test
+        working-directory: ./backend
+
+      - name: Frontend type-check
+        run: npx vue-tsc --noEmit -p tsconfig.app.json
+        working-directory: ./frontend
+
+      - name: Frontend build
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Security audit
+        run: npm audit --audit-level=high

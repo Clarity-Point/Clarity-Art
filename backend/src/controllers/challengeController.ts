@@ -1,0 +1,72 @@
+import { Response } from 'express';
+import prisma from '../config/prisma';
+import { AuthRequest } from '../middleware/auth';
+
+export const getChallenges = async (req: AuthRequest, res: Response) => {
+  try {
+    const challenges = await prisma.challenge.findMany({
+      orderBy: { startDate: 'desc' },
+    });
+
+    const userJoined = req.user
+      ? await prisma.userChallenge.findMany({
+          where: { userId: req.user.id },
+        })
+      : [];
+
+    res.json(
+      challenges.map((c) => ({
+        ...c,
+        joined: userJoined.some((uj) => uj.challengeId === c.id),
+      })),
+    );
+  } catch {
+    res.status(500).json({ error: 'Error fetching challenges' });
+  }
+};
+
+export const joinChallenge = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const { challengeId } = req.body;
+
+  try {
+    const uc = await prisma.userChallenge.upsert({
+      where: { userId_challengeId: { userId: req.user.id, challengeId } },
+      update: {},
+      create: { userId: req.user.id, challengeId },
+    });
+    res.json({ message: 'Joined challenge', uc });
+  } catch {
+    res.status(500).json({ error: 'Error joining challenge' });
+  }
+};
+
+export const completeChallenge = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const { challengeId } = req.body;
+
+  try {
+    const challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+
+    // Award points only on the first completion. Guarding the update on
+    // `completed: false` makes this idempotent — repeat calls can't farm points.
+    const { count } = await prisma.userChallenge.updateMany({
+      where: { userId: req.user.id, challengeId, completed: false },
+      data: { completed: true },
+    });
+
+    if (count === 0) {
+      return res.status(409).json({ error: 'Challenge already completed or not joined' });
+    }
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { points: { increment: challenge.pointsAward } },
+    });
+
+    res.json({ message: 'Challenge completed!', pointsAwarded: challenge.pointsAward });
+  } catch {
+    res.status(500).json({ error: 'Error completing challenge' });
+  }
+};

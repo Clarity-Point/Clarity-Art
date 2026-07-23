@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id                  String               @id @default(uuid())
+  name                String
+  inviteCode          String               @unique
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  users               User[]               @relation("OrgMembers")
+  peerSupportMessages PeerSupportMessage[]
+}
+
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  password        String
+  role            Role              @default(USER)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  streak          Int               @default(0)
+  lastActivity    DateTime          @default(now())
+  points          Int               @default(0)
+  organizationId  String?
+  therapistId     String?
+  chatSessions    ChatSession[]
+  courseProgress  CourseProgress[]
+  diaryEntries    DiaryEntry[]
+  imageAnalyses   ImageAnalysis[]
+  profile         Profile?
+  submissions     Submission[]
+  organization    Organization?     @relation("OrgMembers", fields: [organizationId], references: [id])
+  achievements    UserAchievement[]
+  challenges      UserChallenge[]
+  notifications   Notification[]
+  sentimentTrends SentimentTrend[]
+  patients        User[]            @relation("TherapistPatients")
+  therapist       User?             @relation("TherapistPatients", fields: [therapistId], references: [id])
+}
+
+model Profile {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  name                  String?
+  age                   Int?
+  category              String   @default("general")
+  therapyGoals          String?
+  mainConcerns          String?
+  preferredStyle        String   @default("neutral")
+  interests             String[]
+  preferences           String?
+  additionalInfo        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  avatarLevel           Int      @default(1)
+  isSharedWithTherapist Boolean  @default(false)
+  attentionScore        Int      @default(0)
+  sleepHours            Int?
+  stepsCount            Int?
+  heartRateAvg          Int?
+  user                  User     @relation(fields: [userId], references: [id])
+}
+
+model ImageAnalysis {
+  id               String   @id @default(uuid())
+  userId           String
+  prompt           String
+  result           String
+  imageUrl         String?
+  date             DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  isPublic         Boolean  @default(false)
+  likes            Int      @default(0)
+  tokensPrompt     Int      @default(0)
+  tokensCompletion Int      @default(0)
+  cost             Float    @default(0)
+  user             User     @relation(fields: [userId], references: [id])
+}
+
+model Challenge {
+  id          String          @id @default(uuid())
+  title       String
+  description String
+  startDate   DateTime
+  endDate     DateTime
+  pointsAward Int             @default(50)
+  users       UserChallenge[]
+}
+
+model UserChallenge {
+  id          String    @id @default(uuid())
+  userId      String
+  challengeId String
+  completed   Boolean   @default(false)
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, challengeId])
+}
+
+model DiaryEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  content   String
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  riskLevel String   @default("low")
+  tags      String[]
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model ChatSession {
+  id               String        @id @default(uuid())
+  userId           String
+  title            String?
+  date             DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  riskLevel        String        @default("low")
+  tokensPrompt     Int           @default(0)
+  tokensCompletion Int           @default(0)
+  cost             Float         @default(0)
+  tags             String[]
+  messages         ChatMessage[]
+  user             User          @relation(fields: [userId], references: [id])
+}
+
+model ChatMessage {
+  id               String      @id @default(uuid())
+  sessionId        String
+  role             String
+  content          String
+  tokensPrompt     Int         @default(0)
+  tokensCompletion Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  session          ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Course {
+  id             String           @id @default(uuid())
+  slug           String           @unique
+  category       String
+  title          String
+  description    String
+  thumbnailUrl   String?
+  targetAudience String[]
+  goals          String[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  courseProgress CourseProgress[]
+  homework       Homework[]
+  modules        Module[]
+}
+
+model Module {
+  id        String   @id @default(uuid())
+  courseId  String
+  title     String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lessons   Lesson[]
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+model Lesson {
+  id        String   @id @default(uuid())
+  moduleId  String
+  title     String
+  content   String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  module    Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+}
+
+model Homework {
+  id          String       @id @default(uuid())
+  courseId    String
+  title       String
+  description String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  course      Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+}
+
+model Submission {
+  id               String   @id @default(uuid())
+  userId           String
+  homeworkId       String
+  submittedContent String
+  grade            String?
+  analysisText     String?
+  submissionDate   DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  homework         Homework @relation(fields: [homeworkId], references: [id])
+  user             User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, homeworkId])
+}
+
+model CourseProgress {
+  id           String   @id @default(uuid())
+  userId       String
+  courseId     String
+  progress     Int      @default(0)
+  lastAccessed DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  course       Course   @relation(fields: [courseId], references: [id])
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, courseId])
+}
+
+model Achievement {
+  id          String            @id @default(uuid())
+  title       String            @unique
+  description String
+  icon        String
+  criteria    String
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String
+  achievementId String
+  earnedAt      DateTime    @default(now())
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  user          User        @relation(fields: [userId], references: [id])
+
+  @@unique([userId, achievementId])
+}
+
+model SentimentTrend {
+  id        String   @id @default(uuid())
+  userId    String
+  riskLevel String
+  score     Int
+  tags      String[]
+  date      DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("info")
+  isRead    Boolean  @default(false)
+  date      DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PeerSupportMessage {
+  id             String       @id @default(uuid())
+  organizationId String
+  content        String
+  authorTitle    String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+enum Role {
+  USER
+  ADMIN
+  MENTOR
+  ORG_ADMIN
+  THERAPIST
+}
