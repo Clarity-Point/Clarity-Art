@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "audit": "node scripts/audit.mjs --level=high"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

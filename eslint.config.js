@@ -41,9 +41,9 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
 
-  // Node-side TypeScript / scripts (backend).
+  // Node-side TypeScript / scripts (backend, repo tooling).
   {
-    files: ['backend/**/*.{ts,js}', '**/*.config.{ts,js}', '**/*.cjs'],
+    files: ['backend/**/*.{ts,js}', 'scripts/**/*.{js,mjs,cjs}', '**/*.config.{ts,js}', '**/*.cjs'],
     languageOptions: { globals: { ...globals.node } },
   },
 

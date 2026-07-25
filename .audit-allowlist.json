@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "Advisories that must not fail CI, with the reason each is accepted.",
+    "Keep this list as short as possible and re-check it on every dependency bump —",
+    "an entry is a promise to remove it, not a permanent exemption.",
+    "Everything not listed here still fails the build at high severity."
+  ],
+  "allow": [
+    {
+      "module": "find-my-way",
+      "advisory": "GHSA-c96f-x56v-gq3h",
+      "reason": "Reached only through @prisma/dev, the Prisma CLI's local development server. Production runs `prisma migrate deploy` and never starts that server, so the HTTP/2 DoS is not reachable. The only published fix downgrades prisma to 7.8.0, a breaking change.",
+      "review": "Drop once @prisma/dev ships find-my-way >= 9.7.0."
+    },
+    {
+      "module": "valibot",
+      "advisory": "GHSA-5qjj-4xww-7phc",
+      "reason": "Same dependency path as above (@prisma/dev); not reachable from the server runtime.",
+      "review": "Drop once @prisma/dev ships valibot >= 1.4.2."
+    },
+    {
+      "module": "@prisma/dev",
+      "reason": "Flagged transitively because of the two advisories above; the package itself is development-only tooling.",
+      "review": "Drop together with the entries above."
+    },
+    {
+      "module": "prisma",
+      "reason": "Flagged only as the parent of @prisma/dev. The Prisma CLI is a runtime dependency because the container entrypoint applies migrations on boot.",
+      "review": "Drop together with the entries above."
+    }
+  ]
+}

@@ -59,8 +59,10 @@ jobs:
         run: npm run build
         working-directory: ./frontend
 
+      # Fails on every high/critical advisory except those with a written
+      # justification in .audit-allowlist.json.
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: npm run audit
 
   # Builds the images without publishing, so a broken Dockerfile fails the PR
   # rather than the release. Publishing lives in docker-publish.yml.
