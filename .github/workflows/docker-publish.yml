@@ -28,7 +28,7 @@ jobs:
             dockerfile: frontend/Dockerfile
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Docker Hub is optional: forks and contributors without the secrets still
       # get a full GHCR publish instead of a red build.
