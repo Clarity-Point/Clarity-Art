@@ -1,0 +1,50 @@
+version: 2
+
+updates:
+  # npm workspaces are covered by the root manifest; Dependabot follows the
+  # lockfile into backend/ and frontend/ from here.
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+    groups:
+      # One PR per ecosystem keeps review manageable; security updates are still
+      # raised individually and immediately.
+      dev-tooling:
+        dependency-type: development
+        update-types: ['minor', 'patch']
+      production-minor-patch:
+        dependency-type: production
+        update-types: ['minor', 'patch']
+    ignore:
+      # TypeScript 7 (the native compiler) breaks vue-tsc and ts-node. The version
+      # is pinned in the root `overrides`; unpin deliberately, not by bot.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(actions)'
+
+  # Base images for both services (node:22-alpine, nginx:alpine).
+  - package-ecosystem: docker
+    directories:
+      - '/backend'
+      - '/frontend'
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(docker)'

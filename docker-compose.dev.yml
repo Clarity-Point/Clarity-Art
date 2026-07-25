@@ -37,7 +37,11 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-clarity}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-clarity}?schema=public
-      JWT_SECRET: '${JWT_SECRET:?set JWT_SECRET in .env — generate one with openssl rand -hex 32}'
+      # Not enforced by Compose (unlike the production stack): a required
+      # variable here would also block `up -d db`, since Compose interpolates
+      # every service even when starting one. The backend already refuses to
+      # boot without a strong secret, with a clear message.
+      JWT_SECRET: '${JWT_SECRET:-}'
       NODE_ENV: development
       PORT: 3100
       FRONTEND_URL: http://localhost:5173

@@ -1,11 +1,11 @@
+# Discussions are not enabled on this repository, so questions are routed to an
+# issue form instead of a dead link. If Discussions is turned on later, add a
+# contact link here and retire question.yml.
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
     url: https://github.com/Clarity-Point/Clarity-Art/security/advisories/new
     about: Report privately — never in a public issue.
-  - name: Question or idea
-    url: https://github.com/Clarity-Point/Clarity-Art/discussions
-    about: Ask questions and discuss ideas in Discussions.
   - name: In crisis?
     url: https://findahelpline.com
     about: >

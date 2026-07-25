@@ -15,7 +15,11 @@ Older snapshots are not maintained.
 
 Instead, report privately through GitHub's
 [private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
-(the **Security → Report a vulnerability** tab of this repository).
+— the **Security → Report a vulnerability** button on this repository.
+
+If that button is not available to you, open a regular issue containing **only**
+a request to be contacted about a security matter — no details, no reproduction
+steps — and a maintainer will arrange a private channel.
 
 When reporting, please include:
 

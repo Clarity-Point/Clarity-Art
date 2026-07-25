@@ -1,0 +1,43 @@
+name: Question
+description: Ask about setup, configuration or how something works
+labels: ['question']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, the [README](../blob/main/README.md) covers installation,
+        Docker images, logging and health checks, and
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) covers the development setup.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried?
+      description: Commands run, configuration used, and anything that did not work.
+
+  - type: dropdown
+    id: how-running
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker Compose (production stack)
+        - Docker Compose (dev stack)
+        - Locally with npm
+        - Not running it yet
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This question contains no secrets and no real personal data
+          required: true

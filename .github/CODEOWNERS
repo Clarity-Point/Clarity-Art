@@ -1,13 +1,15 @@
-# Code Owners
+# Code Owners — requested as reviewers automatically on matching pull requests.
 #
-# The public Community Edition is maintained by the project maintainers.
-# Adjust these handles to match your organization's teams as they are set up.
-* @Clarity-Point/maintainers
+# The account is a personal one, so owners are individual handles: team
+# references (@owner/team) only resolve inside a GitHub organization and would
+# silently never assign anyone.
+* @Clarity-Point
 
 # Safety, privacy and dependency changes require maintainer review.
-/backend/src/controllers/aiController.ts @Clarity-Point/maintainers
-/backend/src/services/crisisService.ts   @Clarity-Point/maintainers
-/backend/src/middleware/auth.ts          @Clarity-Point/maintainers
-/backend/prisma/                         @Clarity-Point/maintainers
-/.github/                                @Clarity-Point/maintainers
-/SECURITY.md                             @Clarity-Point/maintainers
+/backend/src/controllers/aiController.ts @Clarity-Point
+/backend/src/services/crisisService.ts   @Clarity-Point
+/backend/src/middleware/auth.ts          @Clarity-Point
+/backend/prisma/                         @Clarity-Point
+/.github/                                @Clarity-Point
+/SECURITY.md                             @Clarity-Point
+/.audit-allowlist.json                   @Clarity-Point
