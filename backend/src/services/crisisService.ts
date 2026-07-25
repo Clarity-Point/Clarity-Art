@@ -1,5 +1,8 @@
 import axios from 'axios';
 import { AI_BASE_URL, AI_MODEL, AI_ENABLED, aiHeaders } from '../config/ai';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('crisisService');
 
 /**
  * Safety signal, not a diagnosis or a crisis decision.
@@ -61,12 +64,12 @@ export const analyzeCrisisRisk = async (text: string): Promise<CrisisSignal> => 
     if (result === 'medium') return 'medium';
     if (result === 'low') return 'low';
 
-    console.warn('Crisis screen returned an unexpected value');
+    log.warn('Crisis screen returned an unexpected value');
     return 'unavailable';
   } catch (error) {
-    console.error(
-      'Crisis screen unavailable:',
-      error instanceof Error ? error.message : String(error),
+    log.error(
+      { err: error instanceof Error ? error.message : String(error) },
+      'Crisis screen unavailable',
     );
     return 'unavailable';
   }

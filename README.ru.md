@@ -49,16 +49,61 @@ Full-stack веб-приложение, где человек ведёт дне�
 | `frontend` | Vue 3 · Vite · Pinia · Vue Router              | 5173       |
 | `backend`  | Express 5 · TypeScript · Prisma 7 · PostgreSQL | 3100       |
 
-## Быстрый старт
+## Быстрый старт — Docker (без клонирования, без сборки)
+
+На каждый релиз публикуются готовые multi-arch образы (amd64 · arm64), поэтому
+для запуска всего стека нужны два файла и одна команда:
+
+```bash
+curl -O https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/.env.example
+
+# Задайте два обязательных значения
+sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$(openssl rand -hex 32)/" .env
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env
+
+docker compose up -d
+```
+
+Приложение доступно на **http://localhost**. Миграции применяются автоматически при старте.
+
+| Образ                                        | Назначение                     |
+| -------------------------------------------- | ------------------------------ |
+| `ghcr.io/clarity-point/clarity-art-backend`  | API (Express · Prisma)         |
+| `ghcr.io/clarity-point/clarity-art-frontend` | SPA + nginx, проксирует `/api` |
+
+Можно закрепить релиз вместо отслеживания `latest`, задав `BACKEND_IMAGE` и
+`FRONTEND_IMAGE` в `.env`. Полезные команды:
+
+```bash
+docker compose logs -f          # смотреть логи
+docker compose pull && docker compose up -d   # обновление
+docker compose down             # остановить (добавьте -v, чтобы также удалить базу данных)
+```
+
+## Быстрый старт — из исходников
 
 Нужны **Node.js 22+** и **Docker** (для PostgreSQL).
+
+Dev-стек собирается из вашего чекаута и делает hot reload для обоих сервисов:
+
+```bash
+cp .env.example .env    # задайте JWT_SECRET и POSTGRES_PASSWORD
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Фронтенд http://localhost:5173 · бэкенд http://localhost:3100 · Swagger
+http://localhost:3100/api-docs.
+
+<details>
+<summary>Или запустить напрямую на хосте</summary>
 
 ```bash
 npm install                       # ставит оба воркспейса
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 
-docker compose up -d db           # PostgreSQL (хост-порт 5433)
+docker compose -f docker-compose.dev.yml up -d db   # PostgreSQL (хост-порт 5433)
 cd backend
 npx prisma migrate deploy         # применить миграции
 npx prisma generate               # сгенерировать Prisma Client
@@ -75,6 +120,8 @@ cd .. && npm start                # фронтенд :5173 + бэкенд :3100
 
 > Бэкенд **не стартует** без сильного, не-плейсхолдерного `JWT_SECRET`.
 > Swagger (только dev): http://localhost:3100/api-docs.
+
+</details>
 
 ## ИИ: опционально, локально, без привязки к вендору
 
@@ -102,13 +149,51 @@ cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json   # типы фронт
 cd frontend && npm run build                               # production-сборка
 ```
 
-## Docker
+## Логирование
 
-```bash
-docker compose up --build   # доступно на http://localhost (nginx проксирует /api)
+Структурированное логирование через [pino](https://getpino.io), полностью настраивается
+через переменные окружения — один и тот же образ работает в любом режиме без пересборки.
+
+| Переменная   | Значения                                                              | По умолчанию                                    |
+| ------------ | --------------------------------------------------------------------- | ----------------------------------------------- |
+| `LOG_LEVEL`  | `trace` `debug` `info` `warn` `error` `fatal` `silent`                | `debug` (dev) · `info` (prod) · `silent` (test) |
+| `LOG_FORMAT` | `pretty` (с подсветкой, для человека) · `json` (по объекту на строку) | `pretty` (dev) · `json` (prod)                  |
+
+```jsonc
+// LOG_FORMAT=json — готово для Loki, Datadog, CloudWatch или ELK
+{
+  "level": "info",
+  "time": 1730000000000,
+  "service": "clarity-backend",
+  "requestId": "a1b2…",
+  "method": "GET",
+  "path": "/api/courses",
+  "status": 200,
+  "durationMs": 12.4,
+  "msg": "GET /api/courses 200",
+}
 ```
 
-Миграции применяются автоматически при старте контейнера бэкенда.
+- У каждого запроса есть заголовок **`X-Request-Id`**; тот же id появляется в
+  строке лога и в ответах об ошибках, так что по одному id можно найти точную
+  запись на сервере.
+- Уровень записи зависит от кода статуса: `5xx` → error, `4xx` → warn, иначе info.
+- **Учётные данные и заголовки авторизации централизованно маскируются**, а тела
+  запросов никогда не логируются — они регулярно содержат текст дневника и
+  сообщения чата.
+- Логи контейнера ротируются по 10 МБ × 3 файла, поэтому долго работающий хост
+  не переполнится.
+
+## Health checks
+
+| Эндпоинт        | Значение                                                                   |
+| --------------- | -------------------------------------------------------------------------- |
+| `/health`       | Liveness — не зависит от внешних сервисов, работает даже при упавшей БД.   |
+| `/health/ready` | Readiness — `503`, пока база данных не отвечает. Используйте для роутинга. |
+
+Оба образа поставляются с Docker `HEALTHCHECK`, а бэкенд корректно завершает
+работу по `SIGTERM` (сначала дренирует соединения, отключает Prisma, затем
+выходит).
 
 ## Демо-данные
 

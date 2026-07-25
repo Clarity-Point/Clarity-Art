@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+
+# Development image: source is bind-mounted by docker-compose.dev.yml and nodemon
+# restarts on change, so the image itself only has to provide the toolchain.
+
+ARG NODE_VERSION=22-alpine
+FROM node:${NODE_VERSION}
+
+WORKDIR /app
+
+RUN apk add --no-cache dumb-init
+
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/
+COPY frontend/package.json frontend/
+RUN npm ci
+
+COPY backend/ backend/
+RUN npm run prisma:generate --workspace backend
+
+ENV NODE_ENV=development \
+    PORT=3100 \
+    LOG_FORMAT=pretty \
+    LOG_LEVEL=debug
+
+WORKDIR /app/backend
+EXPOSE 3100
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npm", "run", "dev"]

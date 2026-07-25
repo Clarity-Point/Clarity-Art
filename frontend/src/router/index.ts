@@ -135,10 +135,7 @@ router.beforeEach(async (to, from, next) => {
     next('/login');
   } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
     next('/');
-  } else if (
-    Array.isArray(to.meta.roles) &&
-    !to.meta.roles.includes(authStore.user?.role ?? '')
-  ) {
+  } else if (Array.isArray(to.meta.roles) && !to.meta.roles.includes(authStore.user?.role ?? '')) {
     // Role-gated area (therapist / org-admin). The backend is the real security
     // boundary — this just keeps users out of pages that would only error for them.
     next('/');

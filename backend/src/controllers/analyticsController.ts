@@ -1,6 +1,9 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('analyticsController');
 
 export const getMoodStats = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -47,7 +50,7 @@ export const getCorrelations = async (req: AuthRequest, res: Response) => {
         'Показаны только введённые вами значения. Приложение не делает медицинских или психологических выводов на их основе.',
     });
   } catch (error) {
-    console.error('getCorrelations error:', error);
+    log.error({ err: error }, 'getCorrelations error');
     res.status(500).json({ error: 'Error calculating correlations' });
   }
 };

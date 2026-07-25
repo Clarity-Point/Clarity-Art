@@ -47,6 +47,18 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
 
+  // Server code must log through the shared pino logger (src/config/logger.ts):
+  // console output bypasses log levels, structured fields and redaction, so a
+  // stray console.log can leak diary or chat content into stdout.
+  // Seed and maintenance scripts under prisma/ are CLI tools — console is fine there.
+  {
+    files: ['backend/src/**/*.ts'],
+    ignores: ['backend/src/tests/**'],
+    rules: {
+      'no-console': 'error',
+    },
+  },
+
   // Project-wide rule tuning.
   {
     rules: {

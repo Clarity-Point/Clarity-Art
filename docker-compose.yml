@@ -1,53 +1,70 @@
+# Production stack — runs prebuilt images, so no clone and no build are needed:
+#
+#   curl -O https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/docker-compose.yml
+#   curl -o .env https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/.env.example
+#   # edit .env — JWT_SECRET is required
+#   docker compose up -d
+#
+# The app is then served on http://localhost.
+# For a source checkout you want to hack on, use docker-compose.dev.yml instead.
+
+name: clarity-art
+
 services:
   db:
-    image: postgres:15
-    restart: always
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: tochka_yasnosti
-    ports:
-      - '5433:5432'
+      POSTGRES_USER: ${POSTGRES_USER:-clarity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-clarity}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Not published to the host by default — nothing outside the compose network
+    # has any reason to reach the database directly.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-clarity} -d ${POSTGRES_DB:-clarity}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    restart: always
+    image: ${BACKEND_IMAGE:-ghcr.io/clarity-point/clarity-art-backend:latest}
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://user:${POSTGRES_PASSWORD:-password}@db:5432/tochka_yasnosti?schema=public
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      # Optional AI provider (OpenAI-compatible; local or hosted). Leave unset to
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clarity}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-clarity}?schema=public
+      JWT_SECRET: '${JWT_SECRET:?set JWT_SECRET in .env — generate one with openssl rand -hex 32}'
+      NODE_ENV: production
+      PORT: 3100
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      # Structured JSON, one object per line — what log shippers expect.
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Optional AI provider (OpenAI-compatible, local or hosted). Leave unset to
       # run with graceful canned fallbacks.
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_MODEL: ${AI_MODEL:-}
       AI_VISION_MODEL: ${AI_VISION_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
-      PORT: 3000
-      FRONTEND_URL: http://localhost
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    logging: &default_logging
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
 
   frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    restart: always
-    depends_on:
-      - backend
-
-  nginx:
-    image: nginx:alpine
-    restart: always
+    image: ${FRONTEND_IMAGE:-ghcr.io/clarity-point/clarity-art-frontend:latest}
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:3100
     ports:
-      - '80:80'
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - '${HTTP_PORT:-80}:80'
     depends_on:
-      - frontend
       - backend
+    logging: *default_logging
 
 volumes:
   postgres_data:

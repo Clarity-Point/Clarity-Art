@@ -1,0 +1,83 @@
+# Development stack — builds from the local checkout and hot-reloads on change.
+#
+#   cp .env.example .env      # JWT_SECRET / POSTGRES_PASSWORD are required
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Frontend  http://localhost:5173   (Vite, HMR)
+# Backend   http://localhost:3100   (nodemon; Swagger at /api-docs)
+# Postgres  localhost:5433          (published so you can attach a GUI client)
+#
+# Logs are pretty-printed and set to debug — see docker-compose.yml for the
+# production counterpart, which builds nothing and logs structured JSON.
+
+name: clarity-art-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-clarity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-clarity}
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-clarity} -d ${POSTGRES_DB:-clarity}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clarity}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-clarity}?schema=public
+      JWT_SECRET: '${JWT_SECRET:?set JWT_SECRET in .env — generate one with openssl rand -hex 32}'
+      NODE_ENV: development
+      PORT: 3100
+      FRONTEND_URL: http://localhost:5173
+      # Human-readable, colourised output for a terminal.
+      LOG_FORMAT: ${LOG_FORMAT:-pretty}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_VISION_MODEL: ${AI_VISION_MODEL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+    ports:
+      - '${BACKEND_PORT:-3100}:3100'
+    volumes:
+      # Source is mounted for hot reload; the anonymous volumes keep the
+      # container's own node_modules from being shadowed by the host's.
+      - ./backend/src:/app/backend/src
+      - ./backend/prisma:/app/backend/prisma
+      - /app/node_modules
+      - /app/backend/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      VITE_PROXY_TARGET: http://backend:3100
+    ports:
+      - '${FRONTEND_PORT:-5173}:5173'
+    volumes:
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/public:/app/frontend/public
+      - ./frontend/index.html:/app/frontend/index.html
+      - /app/node_modules
+      - /app/frontend/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres_dev_data:

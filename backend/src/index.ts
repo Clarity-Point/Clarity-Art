@@ -63,11 +63,24 @@ import { swaggerSpec } from './config/swagger';
 import { authenticateToken, isAdmin, isOrgAdmin, isTherapist } from './middleware/auth';
 import { updateStreak } from './middleware/gamification';
 import { globalErrorHandler } from './middleware/errorHandler';
+import { requestLogger } from './middleware/requestLogger';
+import { logger } from './config/logger';
+import prisma from './config/prisma';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3100;
+
+// Behind nginx (and most PaaS routers) the client address arrives in
+// X-Forwarded-For. Without this, rate limiting and access logs key off the
+// proxy's address, so every user shares one bucket. The value is the number of
+// proxies in front of the app; set TRUST_PROXY=0 when it is exposed directly.
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 
 app.use(helmet());
+
+// Must run before the routes so that every request — including rejected ones —
+// gets a correlation id and an access-log line.
+app.use(requestLogger);
 
 // CORS configuration - specify your frontend URL in production
 const corsOptions = {
@@ -98,6 +111,23 @@ app.use(bodyParser.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => {
   res.send('Точка Ясности API is running!');
+});
+
+// Liveness probe — deliberately dependency-free so it stays up even when the
+// database is down, letting the orchestrator distinguish "process is wedged"
+// from "a downstream service is unavailable".
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Readiness probe — reports whether this instance can actually serve traffic.
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ready', database: 'up' });
+  } catch {
+    res.status(503).json({ status: 'not-ready', database: 'down' });
+  }
 });
 
 // Swagger Documentation — never expose the API docs in production.
@@ -173,7 +203,28 @@ app.use(globalErrorHandler);
 export default app;
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
-    console.log(`Backend listening on port ${port}`);
+  const server = app.listen(port, () => {
+    logger.info({ port, logLevel: logger.level }, `Backend listening on port ${port}`);
+  });
+
+  // Containers are stopped with SIGTERM. Without this the process is killed
+  // mid-request and Postgres connections are left dangling.
+  const shutdown = (signal: string) => {
+    logger.info({ signal }, 'Shutting down');
+    server.close(async () => {
+      await prisma.$disconnect().catch(() => {});
+      process.exit(0);
+    });
+    // Never hang a deploy on a stuck keep-alive connection.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
+  process.on('unhandledRejection', (reason) => logger.error({ reason }, 'Unhandled rejection'));
+  process.on('uncaughtException', (err) => {
+    logger.fatal({ err }, 'Uncaught exception');
+    process.exit(1);
   });
 }

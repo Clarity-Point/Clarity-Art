@@ -1,0 +1,56 @@
+# Rendered at container start by the nginx image's entrypoint, which runs envsubst
+# over /etc/nginx/templates/*.template. Only real environment variables are
+# substituted, so nginx's own $uri / $host runtime variables pass through intact.
+
+server {
+    listen 80;
+    server_name localhost;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Uploaded drawings and diary exports can be sizeable.
+    client_max_body_size 12m;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # Docker's embedded DNS. Resolving the upstream per request (through a
+    # variable) instead of once at startup means nginx still boots when the
+    # backend is not yet up, rather than crash-looping the whole stack.
+    resolver 127.0.0.11 ipv6=off valid=10s;
+
+    location /api/ {
+        set $backend "${BACKEND_URL}";
+        proxy_pass $backend$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # The AI chat endpoint streams tokens; buffering would defeat it.
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+
+    # Vue Router uses history mode — unknown paths must fall back to index.html
+    # so that deep links and page refreshes resolve instead of returning 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # The service worker must never be cached, or clients pin an old build.
+    location = /sw.js {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+}

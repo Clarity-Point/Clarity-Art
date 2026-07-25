@@ -6,6 +6,9 @@ import { AuthRequest } from '../middleware/auth';
 import { registerSchema, loginSchema, profileUpdateSchema } from '../schemas';
 import { JWT_SECRET } from '../config/secrets';
 import { AIService } from '../services/aiService';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('authController');
 
 export const register = async (req: AuthRequest, res: Response) => {
   const validation = registerSchema.safeParse(req.body);
@@ -33,7 +36,7 @@ export const register = async (req: AuthRequest, res: Response) => {
 
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
-    console.error('Registration error:', error);
+    log.error({ err: error }, 'Registration error');
     // Log details server-side only; never leak internal error messages to the client.
     res.status(500).json({ error: 'Error registering user' });
   }
@@ -181,7 +184,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       ),
     });
   } catch (error) {
-    console.error('Error fetching profile:', error);
+    log.error({ err: error }, 'Error fetching profile');
     res.status(500).json({ error: 'Error fetching profile' });
   }
 };
@@ -246,7 +249,7 @@ ${recentDiary}`;
     const { content } = await AIService.generateText(prompt);
     res.json({ analysis: content });
   } catch (error) {
-    console.error('Profile analysis error:', error);
+    log.error({ err: error }, 'Profile analysis error');
     res.status(500).json({ error: 'Error generating profile analysis' });
   }
 };

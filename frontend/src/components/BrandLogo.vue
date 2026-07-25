@@ -20,14 +20,7 @@ withDefaults(defineProps<{ size?: number | string }>(), { size: 24 });
     aria-label="Точка Ясности"
   >
     <defs>
-      <linearGradient
-        id="brandGrad"
-        x1="46"
-        y1="12"
-        x2="20"
-        y2="50"
-        gradientUnits="userSpaceOnUse"
-      >
+      <linearGradient id="brandGrad" x1="46" y1="12" x2="20" y2="50" gradientUnits="userSpaceOnUse">
         <stop stop-color="#2f6bff" />
         <stop offset="0.55" stop-color="#4d54f0" />
         <stop offset="1" stop-color="#7c3aed" />
@@ -35,11 +28,7 @@ withDefaults(defineProps<{ size?: number | string }>(), { size: 24 });
     </defs>
 
     <!-- Links (behind the nodes) -->
-    <g
-      stroke="url(#brandGrad)"
-      stroke-width="2.6"
-      stroke-linecap="round"
-    >
+    <g stroke="url(#brandGrad)" stroke-width="2.6" stroke-linecap="round">
       <line x1="30" y1="31" x2="18.5" y2="18" />
       <line x1="30" y1="31" x2="42" y2="17" />
       <line x1="30" y1="31" x2="41" y2="37" />

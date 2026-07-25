@@ -6,6 +6,9 @@ import { analyzeCrisisRisk } from '../services/crisisService';
 import { rewardPoints } from '../middleware/gamification';
 import { AnalyticsService } from '../services/analyticsService';
 import { validateImageInput, validateTextInput } from '../security/inputValidation';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('aiController');
 
 export const chat = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -68,7 +71,10 @@ export const chat = async (req: AuthRequest, res: Response) => {
 
     res.json({ reply, riskLevel, sessionId: session.id });
   } catch (error: unknown) {
-    console.error('Chat controller error:', error instanceof Error ? error.message : String(error));
+    log.error(
+      { err: error instanceof Error ? error.message : String(error) },
+      'Chat controller error',
+    );
     res.status(500).json({ error: 'Error processing your request' });
   }
 };
@@ -180,7 +186,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
     res.end();
   } catch (error: unknown) {
-    console.error('Chat stream error:', error instanceof Error ? error.message : String(error));
+    log.error({ err: error instanceof Error ? error.message : String(error) }, 'Chat stream error');
     res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`);
     res.end();
   }
@@ -252,9 +258,9 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
 
     res.json({ reply });
   } catch (error: unknown) {
-    console.error(
-      'Image analysis controller error:',
-      error instanceof Error ? error.message : String(error),
+    log.error(
+      { err: error instanceof Error ? error.message : String(error) },
+      'Image analysis controller error',
     );
     res.status(500).json({ error: 'Error processing your image analysis request' });
   }

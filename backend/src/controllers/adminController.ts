@@ -1,6 +1,9 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('adminController');
 
 export const createCourse = async (req: AuthRequest, res: Response) => {
   try {
@@ -131,7 +134,7 @@ export const gradeSubmission = async (req: AuthRequest, res: Response) => {
     });
     res.json(submission);
   } catch (error) {
-    console.error('gradeSubmission error:', error);
+    log.error({ err: error }, 'gradeSubmission error');
     res.status(500).json({ error: 'Error grading submission' });
   }
 };

@@ -52,16 +52,61 @@ Monorepo (npm workspaces) of two packages:
 | `frontend` | Vue 3 · Vite · Pinia · Vue Router              | 5173     |
 | `backend`  | Express 5 · TypeScript · Prisma 7 · PostgreSQL | 3100     |
 
-## Quick start
+## Quick start — Docker (no clone, no build)
+
+Prebuilt multi-arch images (amd64 · arm64) are published on every release, so
+running the whole stack takes two files and one command:
+
+```bash
+curl -O https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/Clarity-Point/Clarity-Art/main/.env.example
+
+# Set the two required values
+sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$(openssl rand -hex 32)/" .env
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env
+
+docker compose up -d
+```
+
+The app is then on **http://localhost**. Migrations run automatically on start.
+
+| Image                                        | Purpose                     |
+| -------------------------------------------- | --------------------------- |
+| `ghcr.io/clarity-point/clarity-art-backend`  | API (Express · Prisma)      |
+| `ghcr.io/clarity-point/clarity-art-frontend` | SPA + nginx, proxies `/api` |
+
+Pin a release instead of tracking `latest` by setting `BACKEND_IMAGE` and
+`FRONTEND_IMAGE` in `.env`. Useful commands:
+
+```bash
+docker compose logs -f          # follow logs
+docker compose pull && docker compose up -d   # upgrade
+docker compose down             # stop (add -v to also drop the database)
+```
+
+## Quick start — from source
 
 Requires **Node.js 22+** and **Docker** (for PostgreSQL).
+
+The dev stack builds from your checkout and hot-reloads both services:
+
+```bash
+cp .env.example .env    # set JWT_SECRET and POSTGRES_PASSWORD
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Frontend http://localhost:5173 · backend http://localhost:3100 · Swagger
+http://localhost:3100/api-docs.
+
+<details>
+<summary>Or run it directly on the host</summary>
 
 ```bash
 npm install                       # installs both workspaces
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 
-docker compose up -d db           # PostgreSQL (host port 5433)
+docker compose -f docker-compose.dev.yml up -d db   # PostgreSQL (host port 5433)
 cd backend
 npx prisma migrate deploy         # apply migrations
 npx prisma generate               # generate Prisma Client
@@ -78,6 +123,8 @@ Fill in `backend/.env` — only two variables are required:
 
 > The backend **refuses to start** without a strong, non-placeholder `JWT_SECRET`.
 > Swagger (dev only): http://localhost:3100/api-docs.
+
+</details>
 
 ## AI: optional, local, no vendor lock-in
 
@@ -105,13 +152,47 @@ cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json   # frontend types
 cd frontend && npm run build                               # production build
 ```
 
-## Docker
+## Logging
 
-```bash
-docker compose up --build   # served on http://localhost (nginx proxies /api)
+Structured logging via [pino](https://getpino.io), configured entirely through
+the environment — the same image works in every mode without a rebuild.
+
+| Variable     | Values                                                               | Default                                         |
+| ------------ | -------------------------------------------------------------------- | ----------------------------------------------- |
+| `LOG_LEVEL`  | `trace` `debug` `info` `warn` `error` `fatal` `silent`               | `debug` (dev) · `info` (prod) · `silent` (test) |
+| `LOG_FORMAT` | `pretty` (colourised, human-readable) · `json` (one object per line) | `pretty` (dev) · `json` (prod)                  |
+
+```jsonc
+// LOG_FORMAT=json — ready for Loki, Datadog, CloudWatch or ELK
+{
+  "level": "info",
+  "time": 1730000000000,
+  "service": "clarity-backend",
+  "requestId": "a1b2…",
+  "method": "GET",
+  "path": "/api/courses",
+  "status": 200,
+  "durationMs": 12.4,
+  "msg": "GET /api/courses 200",
+}
 ```
 
-Migrations run automatically when the backend container starts.
+- Every request gets a **`X-Request-Id`** header; the same id appears in each log
+  line and in error responses, so one id pins the exact server-side entry.
+- Request level follows the status code: `5xx` → error, `4xx` → warn, else info.
+- **Credentials and auth headers are redacted centrally**, and request bodies are
+  never logged — they routinely carry diary text and chat messages.
+- Container logs rotate at 10 MB × 3 files, so a long-running host cannot fill up.
+
+## Health checks
+
+| Endpoint        | Meaning                                                              |
+| --------------- | -------------------------------------------------------------------- |
+| `/health`       | Liveness — dependency-free, stays up even when the database is down. |
+| `/health/ready` | Readiness — `503` unless the database answers. Use this for routing. |
+
+Both images ship a Docker `HEALTHCHECK`, and the backend shuts down gracefully on
+`SIGTERM` (drains connections, disconnects Prisma, then exits).
 
 ## Demo data
 

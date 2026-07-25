@@ -1,0 +1,33 @@
+# Keep the build context small and free of secrets. Everything the images need is
+# installed from package-lock.json inside the build, never copied from the host.
+**/node_modules
+**/dist
+**/dist-ssr
+**/build
+**/coverage
+**/.nyc_output
+backend/generated
+backend/src/generated
+
+# Secrets must never enter an image layer — .env.example is the only one shipped.
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+
+.git
+.github
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+.vscode
+.idea
+.omc
+
+# Docs and tooling have no effect on the runtime image.
+*.md
+!README.md
+.prettierrc.json
+.prettierignore
+eslint.config.js
+docker-compose*.yml

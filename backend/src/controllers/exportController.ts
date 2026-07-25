@@ -2,6 +2,9 @@ import { Response } from 'express';
 import PDFDocument from 'pdfkit';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('exportController');
 
 export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -91,7 +94,7 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
 
     doc.end();
   } catch (error) {
-    console.error('PDF Export Error:', error);
+    log.error({ err: error }, 'PDF Export Error');
     res.status(500).json({ error: 'Error generating PDF' });
   }
 };

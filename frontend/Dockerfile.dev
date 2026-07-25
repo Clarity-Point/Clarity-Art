@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+
+# Development image: runs the Vite dev server with HMR. Source is bind-mounted by
+# docker-compose.dev.yml, so edits on the host are picked up immediately.
+
+ARG NODE_VERSION=22-alpine
+FROM node:${NODE_VERSION}
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY frontend/package.json frontend/
+COPY backend/package.json backend/
+RUN npm ci --workspace frontend --include-workspace-root
+
+COPY frontend/ frontend/
+
+ENV NODE_ENV=development
+
+WORKDIR /app/frontend
+EXPOSE 5173
+
+# --host binds 0.0.0.0 so the port is reachable from outside the container.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

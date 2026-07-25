@@ -1,6 +1,9 @@
 import { Response, NextFunction } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from './auth';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('gamification');
 
 export const rewardPoints = async (userId: string, points: number, _reason?: string) => {
   await prisma.user.update({
@@ -136,7 +139,7 @@ export const updateStreak = async (req: AuthRequest, res: Response, next: NextFu
 
     next();
   } catch (error) {
-    console.error('Streak update error:', error);
+    log.error({ err: error }, 'Streak update error');
     next();
   }
 };

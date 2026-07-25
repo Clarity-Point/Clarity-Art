@@ -20,6 +20,7 @@ export const globalErrorHandler = (
 
   logger.error(
     {
+      requestId: req.id,
       method: req.method,
       url: req.url,
       err: {
@@ -28,12 +29,15 @@ export const globalErrorHandler = (
         statusCode,
       },
     },
-    `[ERROR] ${req.method} ${req.url}`,
+    `${req.method} ${req.url} failed`,
   );
 
   res.status(statusCode).json({
     status: 'error',
     statusCode,
     message,
+    // Lets a user quote one id that pins the exact server-side log entry, without
+    // exposing anything about the failure itself.
+    requestId: req.id,
   });
 };

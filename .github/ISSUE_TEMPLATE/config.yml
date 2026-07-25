@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Clarity-Point/Clarity-Art/security/advisories/new
+    about: Report privately — never in a public issue.
+  - name: Question or idea
+    url: https://github.com/Clarity-Point/Clarity-Art/discussions
+    about: Ask questions and discuss ideas in Discussions.
+  - name: In crisis?
+    url: https://findahelpline.com
+    about: >
+      This project is not emergency care. If you or someone you know is in crisis,
+      contact your local emergency services or a crisis hotline.

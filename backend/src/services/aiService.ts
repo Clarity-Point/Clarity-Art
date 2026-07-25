@@ -1,6 +1,9 @@
 import axios from 'axios';
 import prisma from '../config/prisma';
 import { AI_BASE_URL, AI_MODEL, AI_VISION_MODEL, AI_ENABLED, aiHeaders } from '../config/ai';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('aiService');
 
 /** Token accounting returned by OpenRouter chat/completion responses. */
 export interface AIUsage {
@@ -64,7 +67,7 @@ export class AIService {
       const detail = axios.isAxiosError(error)
         ? (error.response?.data ?? error.message)
         : String(error);
-      console.error('AIService generateText error:', detail);
+      log.error({ err: detail }, 'AIService generateText error');
       throw new Error('Failed to generate text from AI via OpenRouter');
     }
   }
@@ -112,7 +115,7 @@ export class AIService {
       const tagsString = response.data.choices[0].message.content;
       return tagsString.split(',').map((t: string) => t.trim().replace('.', ''));
     } catch (e) {
-      console.error('Failed to extract tags', e);
+      log.error({ err: e }, 'Failed to extract tags');
       return ['General'];
     }
   }
@@ -179,9 +182,9 @@ export class AIService {
 
       return response.body;
     } catch (error: unknown) {
-      console.error(
-        'AIService generateTextStream error:',
-        error instanceof Error ? error.message : String(error),
+      log.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        'AIService generateTextStream error',
       );
       throw new Error('Failed to start AI stream');
     }
@@ -228,7 +231,7 @@ export class AIService {
       const detail = axios.isAxiosError(error)
         ? (error.response?.data ?? error.message)
         : String(error);
-      console.error('AIService analyzeImage error:', detail);
+      log.error({ err: detail }, 'AIService analyzeImage error');
       throw new Error('Failed to analyze image with AI via OpenRouter');
     }
   }

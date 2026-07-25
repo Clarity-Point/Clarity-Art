@@ -7,44 +7,44 @@
       aria-modal="true"
       aria-labelledby="emergency-title"
     >
-    <div class="modal-content">
-      <div class="header">
-        <span class="warning-icon"><Icon name="alert-triangle" :size="26" /></span>
-        <h2 id="emergency-title">Если вы чувствуете, что вам сейчас небезопасно</h2>
-      </div>
-      <p class="lead">
-        Это приложение не определяет кризис и не заменяет человека. Если есть риск причинить вред
-        себе или другим, пожалуйста, обратитесь за срочной помощью сейчас:
-      </p>
+      <div class="modal-content">
+        <div class="header">
+          <span class="warning-icon"><Icon name="alert-triangle" :size="26" /></span>
+          <h2 id="emergency-title">Если вы чувствуете, что вам сейчас небезопасно</h2>
+        </div>
+        <p class="lead">
+          Это приложение не определяет кризис и не заменяет человека. Если есть риск причинить вред
+          себе или другим, пожалуйста, обратитесь за срочной помощью сейчас:
+        </p>
 
-      <div class="contacts">
-        <div class="contact-item">
-          <span class="contact-icon"><Icon name="phone" :size="18" /></span>
-          <div class="contact-text">
-            <strong>Экстренная помощь</strong>
-            <span class="contact-number">112</span>
-            <span class="contact-note">если существует непосредственная опасность</span>
+        <div class="contacts">
+          <div class="contact-item">
+            <span class="contact-icon"><Icon name="phone" :size="18" /></span>
+            <div class="contact-text">
+              <strong>Экстренная помощь</strong>
+              <span class="contact-number">112</span>
+              <span class="contact-note">если существует непосредственная опасность</span>
+            </div>
+          </div>
+          <div class="contact-item">
+            <span class="contact-icon"><Icon name="heart" :size="18" /></span>
+            <div class="contact-text">
+              <strong>Поддержка человека рядом</strong>
+              <span class="contact-note"
+                >свяжитесь с близким, лечащим специалистом или местной службой психологической
+                помощи</span
+              >
+            </div>
           </div>
         </div>
-        <div class="contact-item">
-          <span class="contact-icon"><Icon name="heart" :size="18" /></span>
-          <div class="contact-text">
-            <strong>Поддержка человека рядом</strong>
-            <span class="contact-note"
-              >свяжитесь с близким, лечащим специалистом или местной службой психологической
-              помощи</span
-            >
-          </div>
-        </div>
-      </div>
 
-      <p class="footer-msg">
-        Арт-практики могут быть поддержкой, но не заменяют экстренную или профессиональную помощь.
-      </p>
+        <p class="footer-msg">
+          Арт-практики могут быть поддержкой, но не заменяют экстренную или профессиональную помощь.
+        </p>
 
-      <button @click="$emit('close')" class="close-btn btn-primary btn-block">
-        Я справлюсь, спасибо
-      </button>
+        <button @click="$emit('close')" class="close-btn btn-primary btn-block">
+          Я справлюсь, спасибо
+        </button>
       </div>
     </div>
   </Teleport>

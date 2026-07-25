@@ -1,6 +1,9 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { createLogger } from '../config/logger';
+
+const log = createLogger('therapistController');
 
 export const getPatients = async (req: AuthRequest, res: Response) => {
   // Role is enforced by the `isTherapist` middleware (fresh DB role check); the
@@ -35,7 +38,7 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
     });
     res.json(patients);
   } catch (error) {
-    console.error('getPatients error:', error);
+    log.error({ err: error }, 'getPatients error');
     res.status(500).json({ error: 'Error fetching patients' });
   }
 };

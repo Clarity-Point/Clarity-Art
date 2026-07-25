@@ -7,7 +7,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
   // .env values are not on process.env — load them explicitly for the dev proxy.
   const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), '');
-  const proxyTarget = env.VITE_PROXY_TARGET || 'http://localhost:3000';
+  // Must match the backend's default PORT (3100).
+  const proxyTarget = env.VITE_PROXY_TARGET || 'http://localhost:3100';
 
   return {
     plugins: [

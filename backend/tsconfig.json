@@ -26,7 +26,10 @@
 
     /* Modules */
     "module": "commonjs" /* Specify what module code is generated. */,
-    // "rootDir": "./",                                  /* Specify the root folder within your source files. */
+    /* Pins the emit layout to dist/<file>.js. Without it the root is inferred from
+       every included file, which pushed the entry point down to dist/src/index.js
+       and broke `npm start`. */
+    "rootDir": "./src",
     // "moduleResolution": "node10",                     /* Specify how TypeScript looks up a file from a given module specifier. */
     // "baseUrl": "./",                                  /* Specify the base directory to resolve non-relative module names. */
     // "paths": {},                                      /* Specify a set of entries that re-map imports to additional lookup locations. */
@@ -107,5 +110,14 @@
     /* Completeness */
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
-  }
+  },
+
+  /* Only application sources are compiled. The root-level tooling configs
+     (vitest.config.ts, vitest.setup.ts, prisma.config.ts) are consumed directly
+     by their own tools and must not land in the build output. */
+  "include": ["src/**/*.ts"],
+  /* Tests are run by Vitest, which does its own transpilation. Emitting them
+     would ship test code in the production image and make Vitest discover the
+     compiled duplicates under dist/. */
+  "exclude": ["node_modules", "dist", "src/tests"]
 }
