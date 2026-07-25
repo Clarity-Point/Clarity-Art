@@ -6,30 +6,33 @@
 
 ARG NODE_VERSION=22-alpine
 
-# ── Dependencies ────────────────────────────────────────────────────────────
-# Only the manifests are copied first, so this layer is reused on every build
-# that does not change a dependency.
-FROM node:${NODE_VERSION} AS deps
+# ── Build ───────────────────────────────────────────────────────────────────
+# Runs on the builder's own platform: `tsc` emits plain JavaScript, so the output
+# is architecture-independent and there is no reason to compile it under QEMU
+# once per target platform. Only the runtime dependencies below, which include
+# Prisma's native engines, actually have to be built for the target.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION} AS build
 WORKDIR /app
+# Manifests first, so this layer is reused by every build that does not change a
+# dependency. The frontend manifest is needed for workspace resolution, but its
+# dependencies are scoped out — otherwise Vite and Rolldown reach a server image.
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/
-# The frontend manifest is needed for workspace resolution, but its dependencies
-# are scoped out — otherwise Vite, Rolldown and friends end up in a server image.
 COPY frontend/package.json frontend/
 RUN npm ci --workspace backend --include-workspace-root
-
-# ── Build ───────────────────────────────────────────────────────────────────
-FROM deps AS build
-WORKDIR /app
 COPY backend/ backend/
 RUN npm run prisma:generate --workspace backend \
  && npm run build --workspace backend
 
 # ── Runtime dependencies ────────────────────────────────────────────────────
-# A separate install keeps devDependencies (TypeScript, vitest, nodemon) out of
-# the final image. The Prisma client is regenerated because pruning removes it.
-FROM deps AS prod-deps
+# Built for the target platform, because Prisma ships native query engines.
+# Installing only production dependencies also keeps TypeScript, Vitest and
+# nodemon out of the final image.
+FROM node:${NODE_VERSION} AS prod-deps
 WORKDIR /app
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/
+COPY frontend/package.json frontend/
 COPY backend/prisma backend/prisma
 COPY backend/prisma.config.ts backend/
 # `--omit=optional` drops the frontend toolchain's platform-specific native

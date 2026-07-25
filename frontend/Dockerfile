@@ -7,7 +7,11 @@
 ARG NODE_VERSION=22-alpine
 
 # ── Build ───────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION} AS build
+# Pinned to the builder's own platform. The output is static HTML/CSS/JS, which
+# is architecture-independent, so there is nothing to gain from running Vite
+# under QEMU emulation once per target platform — and a great deal to lose:
+# emulated arm64 builds take tens of minutes against roughly one natively.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION} AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
