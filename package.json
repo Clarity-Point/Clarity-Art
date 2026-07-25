@@ -16,7 +16,7 @@
     "audit": "node scripts/audit.mjs --level=high"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.0",
+    "@eslint/js": "^10.0.1",
     "eslint": "^9.39.0",
     "eslint-plugin-vue": "^10.5.0",
     "globals": "^16.5.0",
