@@ -3,15 +3,17 @@ import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { organizationCreateSchema, organizationJoinSchema, peerSupportSchema } from '../schemas';
+import {
+  buildPrivacySafeOrgAnalytics,
+  MIN_ORG_AGGREGATE_RESPONSES,
+  OrgSignal,
+} from '../services/orgPrivacyService';
 
 /** One row of the anonymized risk-level breakdown produced by Prisma groupBy. */
 interface RiskStat {
   riskLevel: string;
   _count: number;
 }
-
-/** Aggregated risk activity keyed by `${dayOfWeek}-${hour}`. */
-type HeatmapData = Record<string, { count: number; totalRisk: number }>;
 
 export const createOrg = async (req: AuthRequest, res: Response) => {
   // Authorization is enforced by the `isAdmin` middleware (fresh DB role check).
@@ -79,8 +81,6 @@ export const rotateInviteCode = async (req: AuthRequest, res: Response) => {
   res.json(organization);
 };
 
-const MIN_ORG_AGGREGATE_RESPONSES = 8;
-
 export const getOrgStats = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
@@ -109,50 +109,42 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const analyticsStart = new Date();
+    analyticsStart.setUTCDate(analyticsStart.getUTCDate() - 30);
     const signalWhere = {
       user: { organizationId: user.organizationId },
       riskLevel: { in: ['low', 'medium', 'high'] },
+      date: { gte: analyticsStart },
     };
-    const chatStats = await prisma.chatSession.groupBy({
-      by: ['riskLevel'],
+    const sessions = await prisma.chatSession.findMany({
       where: signalWhere,
-      _count: true,
+      select: { userId: true, date: true, riskLevel: true },
     });
-    const signalCount = chatStats.reduce((total, stat) => total + stat._count, 0);
+    const privacySafe = buildPrivacySafeOrgAnalytics(
+      sessions.map((session) => ({
+        userId: session.userId,
+        date: session.date,
+        riskLevel: session.riskLevel as OrgSignal['riskLevel'],
+      })),
+    );
 
-    if (signalCount < MIN_ORG_AGGREGATE_RESPONSES) {
+    // The threshold is based on distinct active people, not raw session count:
+    // one prolific participant can never unlock organization analytics alone.
+    if (privacySafe.activeMemberCount < MIN_ORG_AGGREGATE_RESPONSES) {
       return res.json({
         orgName: user.organization?.name,
         inviteCode: user.organization?.inviteCode,
         memberCount,
         privacyProtected: true,
         minimumGroupSize: MIN_ORG_AGGREGATE_RESPONSES,
-        message: 'Недостаточно агрегированных сигналов для отображения статистики.',
+        message: 'Недостаточно активных участников для отображения статистики за 30 дней.',
       });
     }
 
-    const sessions = await prisma.chatSession.findMany({
-      where: signalWhere,
-      select: { date: true, riskLevel: true },
-    });
-
-    const heatmapData = sessions.reduce<HeatmapData>((acc, s) => {
-      const day = new Date(s.date).getDay();
-      const hour = new Date(s.date).getHours();
-      const key = `${day}-${hour}`;
-      if (!acc[key]) acc[key] = { count: 0, totalRisk: 0 };
-      acc[key].count++;
-      acc[key].totalRisk += s.riskLevel === 'high' ? 3 : s.riskLevel === 'medium' ? 2 : 1;
-      return acc;
-    }, {});
-
     const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const trends = await prisma.chatSession.groupBy({
-      by: ['date'],
-      where: { ...signalWhere, date: { gte: sevenDaysAgo } },
-      _count: true,
-    });
+    sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
+    const trends = privacySafe.trends.filter((trend) => new Date(trend.date) >= sevenDaysAgo);
+    const chatStats = privacySafe.riskStats;
 
     res.json({
       orgName: user.organization?.name,
@@ -161,7 +153,7 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
       privacyProtected: false,
       minimumGroupSize: MIN_ORG_AGGREGATE_RESPONSES,
       riskStats: chatStats,
-      heatmapData,
+      heatmapData: privacySafe.heatmapData,
       trends,
       hrRecommendations: generateHRRecommendations(chatStats),
       executiveSummary: generateExecutiveSummary(chatStats),

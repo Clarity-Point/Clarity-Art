@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { progressSchema, homeworkSubmissionSchema } from '../schemas';
 import { checkAchievements } from '../middleware/gamification';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { calculateCourseProgress } from '../services/courseProgressService';
 
 /**
  * @openapi
@@ -109,10 +110,33 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
   const validation = progressSchema.safeParse(req.body);
   if (!validation.success) return res.status(400).json({ error: validation.error.format() });
 
-  const { progress, lastAccessed, completedLessons } = validation.data;
+  const { completedLessons } = validation.data;
 
-  const course = await prisma.course.findUnique({ where: { slug: courseSlug } });
+  const course = await prisma.course.findUnique({
+    where: { slug: courseSlug },
+    include: {
+      modules: { select: { lessons: { select: { id: true } } } },
+      homework: { select: { id: true } },
+    },
+  });
   if (!course) return res.status(404).json({ error: 'Course not found' });
+
+  const courseLessonIds = course.modules.flatMap((module) =>
+    module.lessons.map((lesson) => lesson.id),
+  );
+  const submittedHomeworkCount = await prisma.submission.count({
+    where: { userId: req.user.id, homework: { courseId: course.id } },
+  });
+  const canonical = calculateCourseProgress(
+    completedLessons,
+    courseLessonIds,
+    submittedHomeworkCount,
+    course.homework.length,
+  );
+
+  if (canonical.completedLessons.length !== new Set(completedLessons).size) {
+    return res.status(400).json({ error: 'One or more lessons do not belong to this course' });
+  }
 
   const diff = await prisma.$transaction(
     async (tx) => {
@@ -120,27 +144,23 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
         where: { userId_courseId: { userId: req.user!.id, courseId: course.id } },
       });
       const previousRewarded = oldProgress?.rewardedProgress || 0;
-      const nextRewarded = Math.max(previousRewarded, progress);
-      const persistedProgress = Math.max(oldProgress?.progress || 0, progress);
-      const persistedLessons = completedLessons
-        ? [...new Set([...(oldProgress?.completedLessons || []), ...completedLessons])]
-        : oldProgress?.completedLessons || [];
+      const nextRewarded = Math.max(previousRewarded, canonical.progress);
 
       await tx.courseProgress.upsert({
         where: { userId_courseId: { userId: req.user!.id, courseId: course.id } },
         update: {
-          progress: persistedProgress,
+          progress: canonical.progress,
           rewardedProgress: nextRewarded,
-          completedLessons: persistedLessons,
-          lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
+          completedLessons: canonical.completedLessons,
+          lastAccessed: new Date(),
         },
         create: {
           userId: req.user!.id,
           courseId: course.id,
-          progress: persistedProgress,
+          progress: canonical.progress,
           rewardedProgress: nextRewarded,
-          completedLessons: persistedLessons,
-          lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
+          completedLessons: canonical.completedLessons,
+          lastAccessed: new Date(),
         },
       });
 
@@ -155,9 +175,13 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
     },
     { isolationLevel: 'Serializable' },
   );
-  if (diff > 0) await checkAchievements(req.user.id);
+  if (diff > 0) await Promise.allSettled([checkAchievements(req.user.id)]);
 
-  res.json({ message: 'Progress updated' });
+  res.json({
+    message: 'Progress updated',
+    progress: canonical.progress,
+    completedLessons: canonical.completedLessons,
+  });
 });
 
 /**
@@ -191,6 +215,22 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
 
   const { homeworkId, submittedContent } = validation.data;
 
+  const homework = await prisma.homework.findUnique({
+    where: { id: homeworkId },
+    include: {
+      course: {
+        include: {
+          modules: { select: { lessons: { select: { id: true } } } },
+          homework: { select: { id: true } },
+        },
+      },
+    },
+  });
+  if (!homework) return res.status(404).json({ error: 'Homework not found' });
+  const courseLessonIds = homework.course.modules.flatMap((module) =>
+    module.lessons.map((lesson) => lesson.id),
+  );
+
   // Homework is one submission per user (schema @@unique). Allow re-submission by
   // updating in place, but award the 30 points only the first time so they can't
   // be farmed by submitting repeatedly.
@@ -209,17 +249,66 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
         where: { userId_homeworkId: { userId: req.user!.id, homeworkId } },
         data: { submittedContent, submissionDate: new Date() },
       });
-      if (inserted.count === 1) {
+      const currentProgress = await tx.courseProgress.findUnique({
+        where: {
+          userId_courseId: { userId: req.user!.id, courseId: homework.courseId },
+        },
+      });
+      const submittedHomeworkCount = await tx.submission.count({
+        where: { userId: req.user!.id, homework: { courseId: homework.courseId } },
+      });
+      const canonical = calculateCourseProgress(
+        currentProgress?.completedLessons || [],
+        courseLessonIds,
+        submittedHomeworkCount,
+        homework.course.homework.length,
+      );
+      const previousRewarded = currentProgress?.rewardedProgress || 0;
+      const nextRewarded = Math.max(previousRewarded, canonical.progress);
+      const progressPointsAwarded = (nextRewarded - previousRewarded) * 2;
+      const courseProgress = await tx.courseProgress.upsert({
+        where: {
+          userId_courseId: { userId: req.user!.id, courseId: homework.courseId },
+        },
+        update: {
+          ...canonical,
+          rewardedProgress: nextRewarded,
+          lastAccessed: new Date(),
+        },
+        create: {
+          userId: req.user!.id,
+          courseId: homework.courseId,
+          ...canonical,
+          rewardedProgress: nextRewarded,
+          lastAccessed: new Date(),
+        },
+      });
+      const homeworkPointsAwarded = inserted.count === 1 ? 30 : 0;
+      const totalPointsAwarded = homeworkPointsAwarded + progressPointsAwarded;
+      if (totalPointsAwarded > 0) {
         await tx.user.update({
           where: { id: req.user!.id },
-          data: { points: { increment: 30 } },
+          data: { points: { increment: totalPointsAwarded } },
         });
       }
-      return { submission, pointsAwarded: inserted.count === 1 ? 30 : 0 };
+      return {
+        submission,
+        pointsAwarded: homeworkPointsAwarded,
+        progressPointsAwarded,
+        courseProgress: {
+          courseId: homework.course.slug,
+          courseName: homework.course.title,
+          progress: courseProgress.progress,
+          completedLessons: courseProgress.completedLessons,
+          lastAccessed: courseProgress.lastAccessed,
+        },
+      };
     },
     { isolationLevel: 'Serializable' },
   );
 
-  if (result.pointsAwarded > 0) await checkAchievements(req.user.id);
+  if (result.pointsAwarded + result.progressPointsAwarded > 0) {
+    await Promise.allSettled([checkAchievements(req.user.id)]);
+  }
   res.json({ message: 'Homework submitted', ...result });
 });

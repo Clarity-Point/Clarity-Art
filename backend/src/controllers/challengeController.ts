@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { challengeActionSchema } from '../schemas';
 import { checkAchievements } from '../middleware/gamification';
+import { getChallengeState } from '../services/challengeService';
 
 export const getChallenges = async (req: AuthRequest, res: Response) => {
   try {
@@ -19,6 +20,7 @@ export const getChallenges = async (req: AuthRequest, res: Response) => {
     res.json(
       challenges.map((c) => ({
         ...c,
+        status: getChallengeState(c.startDate, c.endDate),
         joined: userJoined.some((uj) => uj.challengeId === c.id),
         completed: userJoined.some((uj) => uj.challengeId === c.id && uj.completed),
       })),
@@ -35,6 +37,16 @@ export const joinChallenge = async (req: AuthRequest, res: Response) => {
   const { challengeId } = validation.data;
 
   try {
+    const challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+    const state = getChallengeState(challenge.startDate, challenge.endDate);
+    if (state !== 'active') {
+      return res.status(409).json({
+        error:
+          state === 'upcoming' ? 'Челлендж ещё не начался' : 'Период участия в челлендже завершён',
+        code: `CHALLENGE_${state.toUpperCase()}`,
+      });
+    }
     const uc = await prisma.userChallenge.upsert({
       where: { userId_challengeId: { userId: req.user.id, challengeId } },
       update: {},
@@ -55,6 +67,14 @@ export const completeChallenge = async (req: AuthRequest, res: Response) => {
   try {
     const challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
     if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+    const state = getChallengeState(challenge.startDate, challenge.endDate);
+    if (state !== 'active') {
+      return res.status(409).json({
+        error:
+          state === 'upcoming' ? 'Челлендж ещё не начался' : 'Период завершения челленджа истёк',
+        code: `CHALLENGE_${state.toUpperCase()}`,
+      });
+    }
 
     // Award points only on the first completion. Guarding the update on
     // `completed: false` makes this idempotent — repeat calls can't farm points.
@@ -76,7 +96,7 @@ export const completeChallenge = async (req: AuthRequest, res: Response) => {
       return res.status(409).json({ error: 'Challenge already completed or not joined' });
     }
 
-    await checkAchievements(req.user.id);
+    await Promise.allSettled([checkAchievements(req.user.id)]);
 
     res.json({ message: 'Challenge completed!', pointsAwarded: challenge.pointsAward });
   } catch {

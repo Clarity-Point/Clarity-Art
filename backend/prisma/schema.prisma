@@ -132,15 +132,16 @@ model UserChallenge {
 }
 
 model DiaryEntry {
-  id        String   @id @default(uuid())
-  userId    String
-  content   String
-  date      DateTime @default(now())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  riskLevel String   @default("low")
-  tags      String[]
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String          @id @default(uuid())
+  userId         String
+  content        String
+  date           DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  riskLevel      String          @default("low")
+  tags           String[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentimentTrend SentimentTrend?
 
   @@index([userId, date])
 }
@@ -279,13 +280,15 @@ model UserAchievement {
 }
 
 model SentimentTrend {
-  id        String   @id @default(uuid())
-  userId    String
-  riskLevel String
-  score     Int
-  tags      String[]
-  date      DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String      @id @default(uuid())
+  userId       String
+  diaryEntryId String?     @unique
+  riskLevel    String
+  score        Int
+  tags         String[]
+  date         DateTime    @default(now())
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diaryEntry   DiaryEntry? @relation(fields: [diaryEntryId], references: [id], onDelete: Cascade)
 
   @@index([userId, date])
 }

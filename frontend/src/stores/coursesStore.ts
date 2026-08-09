@@ -5,7 +5,7 @@ import axios from 'axios';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export interface Lesson {
-  id?: string;
+  id: string;
   title: string;
   content?: string | null;
   practices?: string[];

@@ -15,6 +15,29 @@ publishes `X.Y.Z`, `X.Y` and `X` tags; `main` publishes `latest`.
 
 ## [Unreleased]
 
+### Changed
+
+- Organisation analytics now require at least eight distinct active members in
+  every released risk, time and trend bucket.
+- Course progress and rewards are calculated from course-owned lesson IDs and
+  persisted homework submissions instead of client-provided percentages.
+- Challenges can only be joined and completed during their configured period.
+- Replaced the ApexCharts runtime with lightweight native SVG/CSS charts,
+  substantially reducing production JavaScript and PWA precache size.
+
+### Fixed
+
+- Editing or deleting a diary entry now updates or removes its derived safety
+  signal, tags and attention score instead of leaving stale analytics behind.
+- Homework submissions immediately synchronize canonical course progress.
+
+### Tests
+
+- CI now applies every migration to a clean PostgreSQL 16 database and verifies
+  that the resulting database matches the Prisma schema.
+- Added regression coverage for aggregate privacy, diary-derived data, course
+  progress, challenge periods and the lightweight chart components.
+
 ## [1.0.0] — 2026-07-25
 
 First public release.

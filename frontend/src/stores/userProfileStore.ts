@@ -246,7 +246,16 @@ export const useUserProfileStore = defineStore('userProfile', () => {
   async function updateCourseProgress(progressEntry: CourseProgressEntry): Promise<boolean> {
     if (shouldSyncToServer()) {
       try {
-        await axios.post(`${API_URL}/courses/${progressEntry.courseId}/progress`, progressEntry);
+        const response = await axios.post(`${API_URL}/courses/${progressEntry.courseId}/progress`, {
+          completedLessons: progressEntry.completedLessons || [],
+        });
+        progressEntry = {
+          ...progressEntry,
+          progress: response.data.progress,
+          completedLessons: response.data.completedLessons,
+          completedDate: response.data.progress === 100 ? new Date().toISOString() : undefined,
+          lastAccessed: new Date().toISOString(),
+        };
       } catch (e) {
         console.error('Failed to sync course progress with backend', e);
         return false;
@@ -283,6 +292,14 @@ export const useUserProfileStore = defineStore('userProfile', () => {
         const response = await axios.post(`${API_URL}/homework`, submission);
         newSubmission.submissionDate =
           response.data.submission?.submissionDate || newSubmission.submissionDate;
+        if (response.data.courseProgress) {
+          const canonicalProgress = response.data.courseProgress as CourseProgressEntry;
+          const progressIndex = profile.value.courseProgress.findIndex(
+            (item) => item.courseId === canonicalProgress.courseId,
+          );
+          if (progressIndex >= 0) profile.value.courseProgress[progressIndex] = canonicalProgress;
+          else profile.value.courseProgress.push(canonicalProgress);
+        }
       } catch (e) {
         console.error('Failed to sync homework with backend', e);
         return false;

@@ -62,12 +62,14 @@
 
         <template v-else-if="hasMoodData">
           <div class="chart-scroll">
-            <ApexChart
-              type="line"
-              height="350"
-              :options="chartOptions"
-              :series="chartSeries"
-            ></ApexChart>
+            <SimpleLineChart
+              :points="moodPoints"
+              :min-y="1"
+              :max-y="3"
+              :height="350"
+              :value-formatter="formatMoodValue"
+              aria-label="Карта настроения по последним сессиям"
+            />
           </div>
           <div class="chart-legend" role="list">
             <span class="legend-item" role="listitem">
@@ -127,8 +129,7 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
-import ApexChart from 'vue3-apexcharts';
-import type { ApexOptions } from 'apexcharts';
+import SimpleLineChart from '@/components/SimpleLineChart.vue';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -136,64 +137,27 @@ interface Correlations {
   insights?: string[];
 }
 
-const chartSeries = ref([{ name: 'Состояние', data: [] as { x: number; y: number }[] }]);
+const moodPoints = ref<{ x: number; y: number }[]>([]);
 const correlations = ref<Correlations>({});
 const loading = ref(true);
 
-const rootStyles = getComputedStyle(document.documentElement);
-const themeToken = (name: string, fallback: string) =>
-  rootStyles.getPropertyValue(name).trim() || fallback;
-
-const chartPrimaryColor = themeToken('--primary-color', '#2563eb'); // blue — calm
-const chartAccentColor = themeToken('--accent-color', '#1e3a8a'); // navy — marker
-const chartMutedColor = themeToken('--muted-text', '#566483');
-const chartBorderColor = themeToken('--border-color', '#e4eaf5');
-const chartCardBg = themeToken('--card-bg', '#ffffff');
-const chartFontFamily = themeToken('--font-sans', 'ui-sans-serif, system-ui, sans-serif');
-
-const chartOptions: ApexOptions = {
-  chart: {
-    id: 'mood-map',
-    toolbar: { show: false },
-    background: 'transparent',
-    fontFamily: chartFontFamily,
-  },
-  theme: { mode: 'light' },
-  grid: { borderColor: chartBorderColor, strokeDashArray: 4 },
-  xaxis: {
-    type: 'datetime',
-    labels: { datetimeFormatter: { day: 'dd MMM' }, style: { colors: chartMutedColor } },
-    axisBorder: { color: chartBorderColor },
-    axisTicks: { color: chartBorderColor },
-  },
-  yaxis: {
-    min: 1,
-    max: 3,
-    tickAmount: 2,
-    labels: {
-      style: { colors: chartMutedColor },
-      formatter: (val: number) => (val === 3 ? 'Спокойствие' : val === 2 ? 'Тревога' : 'Кризис'),
-    },
-  },
-  stroke: { curve: 'smooth', width: 3, colors: [chartPrimaryColor] },
-  colors: [chartPrimaryColor],
-  markers: { size: 5, colors: [chartAccentColor], strokeColors: chartCardBg, strokeWidth: 2 },
-  tooltip: { theme: 'light', x: { format: 'dd MMM yyyy' } },
-  dataLabels: { enabled: false },
-  legend: { show: false },
-};
-
-const totalSessions = computed(() => chartSeries.value[0].data.length);
+const totalSessions = computed(() => moodPoints.value.length);
 const hasMoodData = computed(() => totalSessions.value > 0);
 
 const averageLabel = computed(() => {
-  const points = chartSeries.value[0].data;
+  const points = moodPoints.value;
   if (!points.length) return '—';
   const avg = points.reduce((sum, p) => sum + p.y, 0) / points.length;
   if (avg >= 2.5) return 'Спокойствие';
   if (avg >= 1.5) return 'Тревога';
   return 'Кризис';
 });
+
+const formatMoodValue = (value: number) => {
+  if (value >= 2.5) return 'Спокойствие';
+  if (value >= 1.5) return 'Тревога';
+  return 'Кризис';
+};
 
 const hasInsights = computed(
   () => Array.isArray(correlations.value.insights) && correlations.value.insights.length > 0,
@@ -207,7 +171,7 @@ onMounted(async () => {
       axios.get(`${API_URL}/analytics/correlations`),
     ]);
 
-    chartSeries.value[0].data = moodRes.data.map((s: { date: string; score: number }) => ({
+    moodPoints.value = moodRes.data.map((s: { date: string; score: number }) => ({
       x: new Date(s.date).getTime(),
       y: s.score,
     }));
@@ -279,18 +243,6 @@ onMounted(async () => {
 
 .chart-scroll {
   overflow-x: auto;
-}
-
-.chart-card :deep(.apexcharts-tooltip) {
-  background: var(--card-bg) !important;
-  border-color: var(--border-color) !important;
-  color: var(--text-color) !important;
-  box-shadow: var(--shadow-md) !important;
-}
-.chart-card :deep(.apexcharts-tooltip-title) {
-  background: var(--bg-soft) !important;
-  border-color: var(--border-color) !important;
-  color: var(--muted-text) !important;
 }
 
 .chart-legend {

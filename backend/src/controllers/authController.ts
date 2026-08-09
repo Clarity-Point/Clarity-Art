@@ -403,6 +403,7 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
       chatSessions: { include: { messages: true } },
       challenges: { include: { challenge: true } },
       notifications: true,
+      sentimentTrends: true,
     },
   });
   if (!user) return res.status(404).json({ error: 'Account not found' });

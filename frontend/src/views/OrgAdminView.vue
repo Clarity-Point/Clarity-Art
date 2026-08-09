@@ -61,12 +61,12 @@
           <div class="section-head">
             <h2 class="section-title">Динамика вовлечённости (7 дней)</h2>
           </div>
-          <ApexChart
-            type="line"
-            height="200"
-            :options="trendOptions"
-            :series="trendSeries"
-          ></ApexChart>
+          <SimpleLineChart
+            :points="trendPoints"
+            :min-y="0"
+            :height="200"
+            aria-label="Количество активных участников за семь дней"
+          />
         </section>
 
         <section class="card chart-card">
@@ -114,15 +114,30 @@
             </button>
           </div>
         </div>
-        <ApexChart
-          type="heatmap"
-          height="350"
-          :options="chartOptions"
-          :series="chartSeries"
-        ></ApexChart>
+        <div class="privacy-heatmap" role="table" aria-label="Групповая карта активности">
+          <div class="heatmap-corner"></div>
+          <div v-for="slot in heatmapSlotLabels" :key="slot" class="heatmap-axis">
+            {{ slot }}
+          </div>
+          <template v-for="row in heatmapRows" :key="row.day">
+            <div class="heatmap-day">{{ row.day }}</div>
+            <button
+              v-for="cell in row.cells"
+              :key="cell.slot"
+              type="button"
+              class="heatmap-cell"
+              :class="heatmapCellClass(cell.value)"
+              :disabled="cell.count === 0"
+              @click="showHeatmapDetails(row.day, cell.slot, cell.count)"
+            >
+              {{ cell.count > 0 ? cell.value : '—' }}
+            </button>
+          </template>
+        </div>
         <p class="chart-hint muted">
-          <Icon name="eye" :size="14" />
-          Кликните на ячейку для детального анализа событий этого периода.
+          <Icon name="shield" :size="14" />
+          Ячейка отображается только при наличии данных минимум от
+          {{ stats.minimumGroupSize || 8 }} разных участников.
         </p>
       </section>
 
@@ -163,8 +178,7 @@
 import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
-import ApexChart from 'vue3-apexcharts';
-import type { ApexChartEventOpts, ApexOptions } from 'apexcharts';
+import SimpleLineChart from '@/components/SimpleLineChart.vue';
 import { useToastStore } from '@/stores/toastStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -208,50 +222,17 @@ const isRotatingCode = ref(false);
 const heatmapDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const heatmapTimeSlots = [0, 4, 8, 12, 16, 20];
 
-const trendOptions: ApexOptions = {
-  chart: { toolbar: { show: false } },
-  stroke: { curve: 'smooth' },
-  xaxis: { type: 'datetime' },
-  colors: ['#2563eb'], // blue — matches theme primary
-};
+const trendPoints = computed(() =>
+  (stats.value.trends || []).map((trend) => ({ x: trend.date, y: trend._count })),
+);
+const heatmapSlotLabels = heatmapTimeSlots.map((hour) => `${hour}–${hour + 4}`);
 
-const trendSeries = computed(() => [
-  {
-    name: 'Количество сессий',
-    data: (stats.value.trends || []).map((t) => ({ x: t.date, y: t._count })),
-  },
-]);
-
-const chartOptions: ApexOptions = {
-  chart: {
-    toolbar: { show: false },
-    events: {
-      dataPointSelection: (_event, _chartContext, config?: ApexChartEventOpts) => {
-        if (!config) return;
-        const day = heatmapDays[config.seriesIndex] || 'выбранный день';
-        const startHour = heatmapTimeSlots[config.dataPointIndex];
-        const slot = startHour === undefined ? 'выбранный период' : `${startHour}–${startHour + 4}`;
-        toastStore.info(`${day}, ${slot}: агрегированная активность сотрудников за этот период.`);
-      },
-    },
-  },
-  dataLabels: { enabled: false },
-  // Risk heatmap keeps a legible low→high ramp, warmed to the theme palette.
-  colors:
-    heatmapMetric.value === 'stress' ? ['#4c7a5b', '#b87b28', '#c1514b'] : ['#e3ece4', '#4c7a5b'],
-  xaxis: {
-    categories: ['0-4', '4-8', '8-12', '12-16', '16-20', '20-24'],
-    title: { text: 'Часы суток' },
-  },
-};
-
-const chartSeries = computed(() => {
-  return heatmapDays.map((dayName, dayIndex) => {
+const heatmapRows = computed(() =>
+  heatmapDays.map((dayName, dayIndex) => {
     const jsDay = (dayIndex + 1) % 7;
-
     return {
-      name: dayName,
-      data: heatmapTimeSlots.map((startHour) => {
+      day: dayName,
+      cells: heatmapTimeSlots.map((startHour) => {
         let totalVal = 0;
         let count = 0;
         for (let h = startHour; h < startHour + 4; h++) {
@@ -262,18 +243,34 @@ const chartSeries = computed(() => {
               count += stats.value.heatmapData[key].count;
             } else {
               totalVal += stats.value.heatmapData[key].count;
-              count = 1; // For activity, totalVal is already what we want
+              count += stats.value.heatmapData[key].count;
             }
           }
         }
         return {
-          x: `${startHour}-${startHour + 4}`,
-          y: count > 0 ? Math.round(totalVal / count) : 0,
+          slot: `${startHour}–${startHour + 4}`,
+          count,
+          value:
+            count > 0
+              ? heatmapMetric.value === 'stress'
+                ? Math.round(totalVal / count)
+                : totalVal
+              : 0,
         };
       }),
     };
-  });
-});
+  }),
+);
+
+const heatmapCellClass = (value: number) => {
+  if (value === 0) return 'heatmap-empty';
+  if (heatmapMetric.value === 'activity') return value >= 24 ? 'heatmap-high' : 'heatmap-low';
+  return value >= 3 ? 'heatmap-high' : value >= 2 ? 'heatmap-mid' : 'heatmap-low';
+};
+
+const showHeatmapDetails = (day: string, slot: string, count: number) => {
+  toastStore.info(`${day}, ${slot}: защищённый агрегат на основе ${count} наблюдений.`);
+};
 
 const fetchStats = async () => {
   loading.value = true;
@@ -415,10 +412,6 @@ const riskIconStyle = (level: string) => {
 .grid-2 {
   margin-bottom: var(--space-6);
 }
-.chart-card :deep(.apexcharts-canvas) {
-  margin: 0 auto;
-}
-
 .heatmap-header,
 .section-head {
   margin-bottom: var(--space-4);
@@ -452,6 +445,48 @@ const riskIconStyle = (level: string) => {
 
 .heatmap-section {
   margin-bottom: var(--space-6);
+}
+.privacy-heatmap {
+  display: grid;
+  grid-template-columns: 48px repeat(6, minmax(72px, 1fr));
+  gap: 6px;
+  overflow-x: auto;
+}
+.heatmap-axis,
+.heatmap-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.heatmap-cell {
+  min-height: 44px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  font-weight: 700;
+  box-shadow: none;
+}
+.heatmap-cell:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.heatmap-empty {
+  background: var(--hover-bg);
+}
+.heatmap-low {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.heatmap-mid {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+.heatmap-high {
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 .chart-hint {
   display: flex;

@@ -70,14 +70,14 @@
                 <h3 class="module-title">{{ module.title }}</h3>
               </div>
               <ul class="lesson-list">
-                <li v-for="(lesson, lIndex) in module.lessons" :key="lIndex" class="lesson-item">
+                <li v-for="lesson in module.lessons" :key="lesson.id" class="lesson-item">
                   <label class="lesson-main">
                     <input
                       type="checkbox"
-                      :checked="isLessonCompleted(lesson.title)"
-                      @change="toggleLesson(lesson.title)"
+                      :checked="isLessonCompleted(lesson.id)"
+                      @change="toggleLesson(lesson.id)"
                     />
-                    <span :class="{ 'completed-text': isLessonCompleted(lesson.title) }">{{
+                    <span :class="{ 'completed-text': isLessonCompleted(lesson.id) }">{{
                       lesson.title
                     }}</span>
                   </label>
@@ -172,23 +172,23 @@ onMounted(async () => {
   }
 });
 
-const isLessonCompleted = (lessonTitle: string) => {
+const isLessonCompleted = (lessonId: string) => {
   if (!course.value) return false;
   const progress = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
-  return progress?.completedLessons?.includes(lessonTitle) || false;
+  return progress?.completedLessons?.includes(lessonId) || false;
 };
 
-const toggleLesson = async (lessonTitle: string) => {
+const toggleLesson = async (lessonId: string) => {
   if (!course.value) return;
 
   const progressEntry = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
   let completedLessons = progressEntry ? [...(progressEntry.completedLessons || [])] : [];
 
-  const index = completedLessons.indexOf(lessonTitle);
+  const index = completedLessons.indexOf(lessonId);
   if (index > -1) {
     completedLessons.splice(index, 1);
   } else {
-    completedLessons.push(lessonTitle);
+    completedLessons.push(lessonId);
   }
 
   await updateProgress(completedLessons);

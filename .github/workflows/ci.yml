@@ -24,8 +24,22 @@ jobs:
 
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: clarity
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: clarity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clarity -d clarity"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      # Prisma reads this for `generate`; no real database is contacted in CI.
+      # Used both by Prisma generation and the clean-database migration check.
       DATABASE_URL: postgresql://clarity:password@localhost:5432/clarity?schema=public
     steps:
       - uses: actions/checkout@v7
@@ -40,6 +54,14 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace backend
+
+      - name: Apply migrations to a clean PostgreSQL database
+        run: npx prisma migrate deploy
+        working-directory: ./backend
+
+      - name: Verify migrations match the Prisma schema
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+        working-directory: ./backend
 
       - name: Lint
         run: npm run lint

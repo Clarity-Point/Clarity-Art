@@ -38,9 +38,7 @@ export const profileUpdateSchema = z.object({
 });
 
 export const progressSchema = z.object({
-  progress: z.number().min(0).max(100),
-  lastAccessed: z.string().optional(),
-  completedLessons: z.array(z.string().trim().min(1).max(300)).max(500).optional(),
+  completedLessons: z.array(z.string().uuid()).max(500),
 });
 
 export const homeworkSubmissionSchema = z.object({

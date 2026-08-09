@@ -47,7 +47,7 @@
         </div>
 
         <button
-          v-if="!challenge.joined"
+          v-if="!challenge.joined && challenge.status === 'active'"
           @click="join(challenge.id)"
           class="btn-primary btn-block join-btn"
         >
@@ -55,15 +55,19 @@
           Участвовать
         </button>
         <button
-          v-else-if="!challenge.completed"
+          v-else-if="challenge.joined && !challenge.completed && challenge.status === 'active'"
           class="btn-outline btn-block join-btn"
           @click="complete(challenge.id)"
         >
           <Icon name="check-circle" :size="16" /> Завершить челлендж
         </button>
-        <span v-else class="status-msg">
+        <span v-else-if="challenge.completed" class="status-msg">
           <Icon name="check-circle" :size="16" />
           Челлендж завершён
+        </span>
+        <span v-else class="status-msg status-muted">
+          <Icon name="calendar" :size="16" />
+          {{ challenge.status === 'upcoming' ? 'Скоро начнётся' : 'Челлендж завершён' }}
         </span>
       </article>
     </div>
@@ -91,6 +95,7 @@ interface Challenge {
   pointsAward: number;
   joined: boolean;
   completed: boolean;
+  status: 'upcoming' | 'active' | 'ended' | 'invalid';
 }
 
 const challenges = ref<Challenge[]>([]);
@@ -116,7 +121,9 @@ const complete = async (id: string) => {
     await fetchChallenges();
   } catch (error) {
     console.error('Failed to complete challenge:', error);
-    errorMessage.value = 'Не удалось завершить челлендж. Попробуйте ещё раз.';
+    errorMessage.value = axios.isAxiosError(error)
+      ? error.response?.data?.error || 'Не удалось завершить челлендж.'
+      : 'Не удалось завершить челлендж.';
   }
 };
 
@@ -128,6 +135,9 @@ const join = async (id: string) => {
     await fetchChallenges();
   } catch (error) {
     console.error('Failed to join challenge:', error);
+    errorMessage.value = axios.isAxiosError(error)
+      ? error.response?.data?.error || 'Не удалось присоединиться к челленджу.'
+      : 'Не удалось присоединиться к челленджу.';
   }
 };
 
@@ -217,5 +227,8 @@ const timeProgressLabel = (challenge: Challenge): string => {
   font-weight: 600;
   font-size: var(--text-sm);
   padding: 10px;
+}
+.status-muted {
+  color: var(--muted-text);
 }
 </style>

@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'jsdom',
+    // Node's experimental global localStorage conflicts with jsdom's isolated
+    // implementation and emits a warning in every worker.
+    execArgv: ['--no-experimental-webstorage'],
     environmentOptions: {
       jsdom: { url: 'http://localhost/' },
     },

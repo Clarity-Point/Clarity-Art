@@ -1,18 +1,20 @@
 import prisma from '../config/prisma';
 
 export class AnalyticsService {
+  static scoreForRisk(riskLevel: string): number | undefined {
+    return {
+      low: 90,
+      medium: 50,
+      high: 10,
+    }[riskLevel];
+  }
+
   static async logSentiment(userId: string, riskLevel: string, tags: string[], _content: string) {
     // An unavailable automated screen must not be converted into a pseudo-clinical
     // score or used to trigger trend notifications.
     if (riskLevel === 'unavailable') return null;
 
-    const riskToScore: Record<string, number> = {
-      low: 90,
-      medium: 50,
-      high: 10,
-    };
-
-    const score = riskToScore[riskLevel];
+    const score = this.scoreForRisk(riskLevel);
     if (score === undefined) return null;
 
     // Log the trend

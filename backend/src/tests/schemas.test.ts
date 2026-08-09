@@ -13,19 +13,17 @@ describe('persisted user-flow schemas', () => {
     expect(result.success).toBe(true);
   });
 
-  it('keeps completed lesson titles when progress is validated', () => {
+  it('keeps canonical completed lesson ids when progress is validated', () => {
+    const lessonId = '28bf2c7d-c1d3-4325-bad5-3943ddfead27';
     const result = progressSchema.parse({
-      progress: 25,
-      completedLessons: ['Знакомство с практикой'],
+      completedLessons: [lessonId],
     });
-    expect(result.completedLessons).toEqual(['Знакомство с практикой']);
+    expect(result.completedLessons).toEqual([lessonId]);
   });
 
-  it('rejects invalid progress and excessively long lesson labels', () => {
-    expect(progressSchema.safeParse({ progress: 101 }).success).toBe(false);
-    expect(
-      progressSchema.safeParse({ progress: 10, completedLessons: ['x'.repeat(301)] }).success,
-    ).toBe(false);
+  it('rejects client-calculated progress and non-canonical lesson identifiers', () => {
+    expect(progressSchema.safeParse({ progress: 100 }).success).toBe(false);
+    expect(progressSchema.safeParse({ completedLessons: ['not-a-uuid'] }).success).toBe(false);
   });
 
   it('requires a meaningful new account password', () => {

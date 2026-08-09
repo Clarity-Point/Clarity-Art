@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
-import { rewardPoints } from '../middleware/gamification';
+import { checkAchievements } from '../middleware/gamification';
 import { analyzeCrisisRisk } from '../services/crisisService';
 import { AIService } from '../services/aiService';
 import { AnalyticsService } from '../services/analyticsService';
@@ -21,21 +21,42 @@ export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
     const riskLevel = await analyzeCrisisRisk(safeContent, allowProvider);
     const tags = await AIService.extractTags(safeContent, allowProvider);
 
-    // Log trend
-    await AnalyticsService.logSentiment(req.user.id, riskLevel, tags, safeContent);
-
-    const entry = await prisma.diaryEntry.create({
-      data: {
-        userId: req.user.id,
-        content: safeContent,
-        riskLevel,
-        tags,
-        date: new Date(),
-      },
+    const score = AnalyticsService.scoreForRisk(riskLevel);
+    const entry = await prisma.$transaction(async (tx) => {
+      const created = await tx.diaryEntry.create({
+        data: {
+          userId: req.user!.id,
+          content: safeContent,
+          riskLevel,
+          tags,
+          date: new Date(),
+        },
+      });
+      if (score !== undefined) {
+        await tx.sentimentTrend.create({
+          data: {
+            userId: req.user!.id,
+            diaryEntryId: created.id,
+            riskLevel,
+            score,
+            tags,
+          },
+        });
+      }
+      await tx.user.update({
+        where: { id: req.user!.id },
+        data: { points: { increment: 10 } },
+      });
+      return created;
     });
 
-    // Award 10 points for a diary entry
-    await rewardPoints(req.user.id, 10, 'Diary entry');
+    // Derived notifications and achievements are deliberately post-commit: a
+    // secondary calculation must not roll back an already valid diary entry.
+    await Promise.allSettled([
+      ...(score !== undefined ? [AnalyticsService.checkAndNotify(req.user.id, score)] : []),
+      AnalyticsService.updateAttentionScore(req.user.id),
+      checkAchievements(req.user.id),
+    ]);
 
     res.status(201).json(entry);
   } catch {
@@ -79,10 +100,29 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Entry not found' });
     }
 
-    const updated = await prisma.diaryEntry.update({
-      where: { id },
-      data: { content: contentValidation.value, updatedAt: new Date() },
+    const allowProvider = await canUseConfiguredAI(req.user.id);
+    const riskLevel = await analyzeCrisisRisk(contentValidation.value, allowProvider);
+    const tags = await AIService.extractTags(contentValidation.value, allowProvider);
+    const score = AnalyticsService.scoreForRisk(riskLevel);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.diaryEntry.update({
+        where: { id },
+        data: { content: contentValidation.value, riskLevel, tags, updatedAt: new Date() },
+      });
+      if (score === undefined) {
+        await tx.sentimentTrend.deleteMany({ where: { diaryEntryId: id } });
+      } else {
+        await tx.sentimentTrend.upsert({
+          where: { diaryEntryId: id },
+          update: { riskLevel, score, tags, date: new Date() },
+          create: { userId: req.user!.id, diaryEntryId: id, riskLevel, score, tags },
+        });
+      }
+      return saved;
     });
+
+    await Promise.allSettled([AnalyticsService.updateAttentionScore(req.user.id)]);
 
     res.json(updated);
   } catch {
@@ -102,6 +142,8 @@ export const deleteDiaryEntry = async (req: AuthRequest, res: Response) => {
     }
 
     await prisma.diaryEntry.delete({ where: { id } });
+    // The linked SentimentTrend is removed by the database cascade.
+    await Promise.allSettled([AnalyticsService.updateAttentionScore(req.user.id)]);
     res.json({ message: 'Entry deleted' });
   } catch {
     res.status(500).json({ error: 'Error deleting diary entry' });
