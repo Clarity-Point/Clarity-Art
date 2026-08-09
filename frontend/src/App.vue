@@ -1,18 +1,12 @@
 <script setup lang="ts">
 import { RouterView, useRoute } from 'vue-router';
-import { ref, onMounted, computed, watch } from 'vue';
-import { useAuthStore } from '@/stores/authStore';
+import { ref, computed, nextTick, watch } from 'vue';
 import SidebarMenu from '@/components/SidebarMenu.vue';
 import GlobalHeader from '@/components/GlobalHeader.vue';
+import ToastCenter from '@/components/ToastCenter.vue';
 
-const authStore = useAuthStore();
 const route = useRoute();
-
-onMounted(async () => {
-  if (authStore.isAuthenticated) {
-    await authStore.fetchProfile();
-  }
-});
+const mainContent = ref<HTMLElement | null>(null);
 
 // The mobile drawer. On desktop the sidebar is always visible, so this
 // only governs the off-canvas overlay on narrow screens.
@@ -29,10 +23,18 @@ const closeSidebar = () => {
 const isChromeless = computed(() => route.meta.public === true);
 
 // Close the mobile drawer whenever the route changes.
-watch(() => route.fullPath, closeSidebar);
+watch(
+  () => route.fullPath,
+  async () => {
+    closeSidebar();
+    await nextTick();
+    mainContent.value?.focus({ preventScroll: true });
+  },
+);
 </script>
 
 <template>
+  <a v-if="!isChromeless" class="skip-link" href="#main-content">Перейти к содержанию</a>
   <!-- Chromeless: login / register render on their own -->
   <RouterView v-if="isChromeless" />
 
@@ -42,7 +44,7 @@ watch(() => route.fullPath, closeSidebar);
     <SidebarMenu :is-open="isDrawerOpen" @close="closeSidebar" />
 
     <div class="app-body">
-      <main>
+      <main id="main-content" ref="mainContent" tabindex="-1">
         <RouterView />
       </main>
     </div>
@@ -51,6 +53,7 @@ watch(() => route.fullPath, closeSidebar);
       <div v-if="isDrawerOpen" class="scrim" @click="closeSidebar"></div>
     </transition>
   </div>
+  <ToastCenter />
 </template>
 
 <style scoped>
@@ -72,6 +75,23 @@ main {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+}
+main:focus {
+  outline: none;
+}
+.skip-link {
+  position: fixed;
+  left: var(--space-3);
+  top: -80px;
+  z-index: 4000;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--primary-color);
+  color: var(--on-primary);
+  transition: top var(--transition);
+}
+.skip-link:focus {
+  top: var(--space-3);
 }
 
 /* Scrim behind the mobile drawer */

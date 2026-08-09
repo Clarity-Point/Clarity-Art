@@ -173,16 +173,18 @@ export function useImageAnalysis() {
       promptText,
       mimeType,
       base64Image,
+      originalImageName: originalName,
     };
 
     try {
       const response = await axios.post(`${API_URL}/analyze-image`, payload);
       if (response.data.reply) {
         analysisResult.value = response.data.reply;
-        currentAnalysisTimestamp.value = new Date().toISOString();
+        currentAnalysisTimestamp.value = response.data.timestamp || new Date().toISOString();
         if (currentAnalysisPreview.value && analysisResult.value) {
           userProfileStore.addImageAnalysis({
-            timestamp: currentAnalysisTimestamp.value,
+            timestamp: currentAnalysisTimestamp.value || new Date().toISOString(),
+            id: response.data.analysisId,
             imagePreviewUrl: currentAnalysisPreview.value,
             analysisText: analysisResult.value,
             originalImageName: originalName,
@@ -194,7 +196,7 @@ export function useImageAnalysis() {
     } catch (apiError) {
       console.error('Error during backend image analysis call:', apiError);
       if (axios.isAxiosError(apiError) && apiError.response) {
-        errorMessage.value = `Ошибка: ${apiError.response.data || 'Неизвестная ошибка'}`;
+        errorMessage.value = `Ошибка: ${apiError.response.data?.error || 'Не удалось выполнить анализ'}`;
       } else {
         errorMessage.value = 'Произошла непредвиденная ошибка при обмене данными с сервером.';
       }
@@ -243,10 +245,20 @@ export function useImageAnalysis() {
     extendedPrompt +=
       'ответь далее на эти ответы в ответ на расширенны анализ. Пожалуйста, предоставь новый, более глубокий анализ изображения, интегрируя эти ответы.';
 
+    const activeEntry = userProfileStore.profile.imageAnalysisHistory.find(
+      (entry) => entry.timestamp === currentAnalysisTimestamp.value,
+    );
+    const questionsToSave = extendedAnalysisQuestions.value.map((q, index) => ({
+      questionText: q.text,
+      rationale: q.rationale,
+      answer: extendedAnalysisAnswers.value[index] || '',
+    }));
     const payload = {
       promptText: extendedPrompt,
       mimeType,
       base64Image,
+      analysisId: activeEntry?.id,
+      extendedQuestions: questionsToSave,
     };
 
     try {
@@ -254,12 +266,6 @@ export function useImageAnalysis() {
       if (response.data.reply) {
         const newExtendedAnalysisText = response.data.reply;
         extendedAnalysisDisplay.value = newExtendedAnalysisText;
-
-        const questionsToSave = extendedAnalysisQuestions.value.map((q, index) => ({
-          questionText: q.text,
-          rationale: q.rationale,
-          answer: extendedAnalysisAnswers.value[index] || '',
-        }));
 
         userProfileStore.updateImageAnalysis(currentAnalysisTimestamp.value as string, {
           extendedQuestions: questionsToSave,
@@ -271,7 +277,7 @@ export function useImageAnalysis() {
     } catch (apiError) {
       console.error('Error during backend extended analysis call:', apiError);
       if (axios.isAxiosError(apiError) && apiError.response) {
-        errorMessage.value = `Ошибка: ${apiError.response.data || 'Неизвестная ошибка'}`;
+        errorMessage.value = `Ошибка: ${apiError.response.data?.error || 'Не удалось выполнить анализ'}`;
       } else {
         errorMessage.value = 'Произошла непредвиденная ошибка при обмене данными с сервером.';
       }

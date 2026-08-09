@@ -3,8 +3,16 @@ import PDFDocument from 'pdfkit';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createLogger } from '../config/logger';
+import fs from 'node:fs';
 
 const log = createLogger('exportController');
+
+const CYRILLIC_FONT_PATHS = [
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/TTF/DejaVuSans.ttf',
+];
 
 export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -24,10 +32,16 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
     if (!user || !user.profile) return res.status(404).json({ error: 'User data not found' });
 
     const doc = new PDFDocument({ margin: 50 });
+    const fontPath = CYRILLIC_FONT_PATHS.find((path) => fs.existsSync(path));
+    if (!fontPath) {
+      return res.status(503).json({ error: 'PDF font is not installed on the server' });
+    }
+    doc.registerFont('AppFont', fontPath).font('AppFont');
     res.setHeader('Content-Type', 'application/pdf');
+    const displayName = user.profile.name || 'user';
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename=Healing-Book-${user.profile.name || 'user'}.pdf`,
+      `attachment; filename="healing-diary.pdf"; filename*=UTF-8''${encodeURIComponent(`Дневник-${displayName}.pdf`)}`,
     );
     doc.pipe(res);
 
@@ -54,8 +68,8 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
     const avatarNames = ['Росток надежды', 'Лист познания', 'Цветок гармонии', 'Древо мудрости'];
     const avatarLevel = user.points >= 500 ? 4 : user.points >= 200 ? 3 : user.points >= 50 ? 2 : 1;
     doc.fontSize(14).text(`Текущий уровень: ${avatarNames[avatarLevel - 1]}`);
-    doc.text(`Стрик активности: ${user.streak} дней 🔥`);
-    doc.text(`Набрано очков: ${user.points} ⭐`);
+    doc.text(`Серия активности: ${user.streak} дней`);
+    doc.text(`Набрано очков: ${user.points}`);
     doc.moveDown();
 
     // Image Analysis History
@@ -95,6 +109,7 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
     doc.end();
   } catch (error) {
     log.error({ err: error }, 'PDF Export Error');
-    res.status(500).json({ error: 'Error generating PDF' });
+    if (!res.headersSent) return res.status(500).json({ error: 'Error generating PDF' });
+    return res.end();
   }
 };

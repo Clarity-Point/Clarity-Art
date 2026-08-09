@@ -37,6 +37,23 @@
           </RouterLink>
         </div>
 
+        <p class="sb-label">Сообщество</p>
+        <div class="sb-group">
+          <RouterLink
+            v-for="item in communityNav"
+            :key="item.to"
+            :to="item.to"
+            class="sb-item"
+            active-class="active"
+          >
+            <span class="sb-ic"><Icon :name="item.icon" :size="19" /></span>
+            <span class="sb-text">
+              <span class="sb-name">{{ item.name }}</span>
+              <span class="sb-desc">{{ item.desc }}</span>
+            </span>
+          </RouterLink>
+        </div>
+
         <template v-if="manageNav.length">
           <p class="sb-label">Управление</p>
           <div class="sb-group">
@@ -118,6 +135,12 @@ const practiceNav = [
   { to: '/breathing', icon: 'wind', name: 'Дыхание', desc: 'Успокоиться за 3 минуты' },
   { to: '/art-therapy-music', icon: 'music', name: 'Музыка', desc: 'Звуки для расслабления' },
   { to: '/knowledge', icon: 'book', name: 'Библиотека', desc: 'Статьи и материалы' },
+];
+
+const communityNav = [
+  { to: '/gallery', icon: 'image', name: 'Галерея', desc: 'Работы сообщества' },
+  { to: '/challenges', icon: 'target', name: 'Челленджи', desc: 'Практиковаться вместе' },
+  { to: '/leaderboard', icon: 'award', name: 'Прогресс', desc: 'Мягкая таблица активности' },
 ];
 
 const manageNav = computed(() => {

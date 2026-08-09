@@ -201,10 +201,10 @@ onBeforeUnmount(() => {
 const emit = defineEmits(['toggle-sidebar']);
 const goToHome = () => router.push('/');
 const toggleSidebar = () => emit('toggle-sidebar');
-const handleLogout = () => {
-  authStore.logout();
+const handleLogout = async () => {
+  await authStore.logout();
   showUser.value = false;
-  router.push('/login');
+  await router.replace('/login');
 };
 </script>
 

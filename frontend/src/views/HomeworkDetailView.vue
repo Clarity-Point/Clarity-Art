@@ -36,9 +36,9 @@
           type="button"
           class="btn-primary"
           @click="submitHomework"
-          :disabled="!submissionContent.trim()"
+          :disabled="!submissionContent.trim() || isSubmitting"
         >
-          <Icon name="send" :size="16" /> Сдать
+          <Icon name="send" :size="16" /> {{ isSubmitting ? 'Отправляем…' : 'Сдать' }}
         </button>
       </div>
       <p
@@ -108,6 +108,7 @@ const courseContextId = ref<string | null>(null);
 
 const submissionContent = ref('');
 const submissionMessage = ref('');
+const isSubmitting = ref(false);
 
 const getCourseTitle = (id: string) =>
   coursesStore.currentCourse?.id === id ? coursesStore.currentCourse.title : 'Неизвестный курс';
@@ -172,11 +173,17 @@ const submitHomework = async () => {
     return;
   }
 
-  await userProfileStore.addHomeworkSubmission({
+  isSubmitting.value = true;
+  const saved = await userProfileStore.addHomeworkSubmission({
     homeworkId: homeworkId.value,
     homeworkTitle: homeworkTitle.value,
     submittedContent: submissionContent.value,
   });
+  isSubmitting.value = false;
+  if (!saved) {
+    submissionMessage.value = 'Не удалось сдать задание. Ваш текст сохранён в форме.';
+    return;
+  }
   submissionMessage.value = 'Задание успешно сдано!';
 
   if (courseContextId.value) {

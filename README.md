@@ -136,6 +136,7 @@ including a fully local one. Point the backend at it via `backend/.env`:
 AI_BASE_URL=http://localhost:11434/v1   # e.g. Ollama / LM Studio / vLLM / LocalAI
 AI_MODEL=llama3.1
 AI_VISION_MODEL=llava                    # for drawing analysis
+AI_DATA_PROCESSING_MODE=local            # provider runs on your infrastructure
 # AI_API_KEY — leave empty for keyless local servers
 ```
 
@@ -143,12 +144,18 @@ With **no** AI provider configured the app still runs end to end: AI features
 degrade to calm canned responses. There is no mandatory cloud dependency of any
 kind, and no data has to leave your machine.
 
+For a hosted provider, set `AI_DATA_PROCESSING_MODE=external`. The application
+then blocks transmission until the user gives explicit consent in the profile;
+that consent can be revoked at any time. If the mode is omitted for a configured
+provider, the privacy-safe `external` mode is assumed.
+
 ## Tests & checks
 
 ```bash
 npm run lint                                               # eslint (root)
 cd backend  && npm test && npx tsc --noEmit                # vitest + types
 cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json   # frontend types
+cd frontend && npm test                                    # frontend tests
 cd frontend && npm run build                               # production build
 ```
 
@@ -193,6 +200,9 @@ the environment — the same image works in every mode without a rebuild.
 
 Both images ship a Docker `HEALTHCHECK`, and the backend shuts down gracefully on
 `SIGTERM` (drains connections, disconnects Prisma, then exits).
+
+For a public HTTPS deployment, also set `COOKIE_SECURE=true`; terminate TLS at
+the reverse proxy and do not expose PostgreSQL outside the host.
 
 ## Demo data
 

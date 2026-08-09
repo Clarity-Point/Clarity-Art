@@ -21,11 +21,16 @@
         placeholder="Опишите, что происходит внутри вас прямо сейчас..."
       ></textarea>
       <div class="composer-actions">
-        <button class="btn-primary" @click="submitNewEntry" :disabled="!newEntryText.trim()">
+        <button
+          class="btn-primary"
+          @click="submitNewEntry"
+          :disabled="!newEntryText.trim() || isSavingEntry"
+        >
           <Icon name="edit" :size="17" />
-          Добавить запись
+          {{ isSavingEntry ? 'Сохраняем…' : 'Добавить запись' }}
         </button>
       </div>
+      <p v-if="entryError" class="error-message" role="alert">{{ entryError }}</p>
     </section>
 
     <!-- Analysis -->
@@ -179,6 +184,8 @@ import { useDiaryCalendar } from '@/composables/useDiaryCalendar';
 const {
   diaryEntries,
   newEntryText,
+  entryError,
+  isSavingEntry,
   composerTextarea,
   focusComposer,
   editingEntryId,

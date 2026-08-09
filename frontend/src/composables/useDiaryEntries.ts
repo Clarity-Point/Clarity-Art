@@ -13,6 +13,8 @@ export function useDiaryEntries() {
 
   const diaryEntries = computed(() => profile.value.diaryEntries || []);
   const newEntryText = ref('');
+  const entryError = ref('');
+  const isSavingEntry = ref(false);
   const composerTextarea = ref<HTMLTextAreaElement | null>(null);
 
   const focusComposer = () => {
@@ -29,11 +31,15 @@ export function useDiaryEntries() {
     currentEditText.value = entry.text;
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (editingEntryId.value && currentEditText.value.trim() !== '') {
-      userProfileStore.updateDiaryEntry(editingEntryId.value, {
+      const saved = await userProfileStore.updateDiaryEntry(editingEntryId.value, {
         text: currentEditText.value.trim(),
       });
+      if (!saved) {
+        entryError.value = 'Не удалось обновить запись. Изменения оставлены в редакторе.';
+        return;
+      }
     }
     cancelEdit(); // Reset editing state
   };
@@ -43,9 +49,13 @@ export function useDiaryEntries() {
     currentEditText.value = '';
   };
 
-  const requestDeleteEntry = (entryId: string) => {
+  const requestDeleteEntry = async (entryId: string) => {
     if (window.confirm('Вы уверены, что хотите удалить эту запись? Это действие необратимо.')) {
-      userProfileStore.deleteDiaryEntry(entryId);
+      const deleted = await userProfileStore.deleteDiaryEntry(entryId);
+      if (!deleted) {
+        entryError.value = 'Не удалось удалить запись. Попробуйте ещё раз.';
+        return;
+      }
       if (editingEntryId.value === entryId) {
         // If deleting the entry currently being edited
         cancelEdit();
@@ -54,10 +64,14 @@ export function useDiaryEntries() {
   };
   // --- End Editing State & Logic ---
 
-  const submitNewEntry = () => {
+  const submitNewEntry = async () => {
     if (newEntryText.value.trim() === '') return;
-    userProfileStore.addDiaryEntry(newEntryText.value);
-    newEntryText.value = ''; // Clear textarea
+    isSavingEntry.value = true;
+    entryError.value = '';
+    const saved = await userProfileStore.addDiaryEntry(newEntryText.value.trim());
+    if (saved) newEntryText.value = '';
+    else entryError.value = 'Не удалось сохранить запись. Текст не потерян — попробуйте ещё раз.';
+    isSavingEntry.value = false;
   };
 
   const sortedDiaryEntries = computed(() => {
@@ -78,6 +92,8 @@ export function useDiaryEntries() {
   return {
     diaryEntries,
     newEntryText,
+    entryError,
+    isSavingEntry,
     composerTextarea,
     focusComposer,
     editingEntryId,

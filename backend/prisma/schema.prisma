@@ -26,6 +26,7 @@ model User {
   streak          Int               @default(0)
   lastActivity    DateTime          @default(now())
   points          Int               @default(0)
+  sessionVersion  Int               @default(0)
   organizationId  String?
   therapistId     String?
   chatSessions    ChatSession[]
@@ -39,48 +40,74 @@ model User {
   challenges      UserChallenge[]
   notifications   Notification[]
   sentimentTrends SentimentTrend[]
+  imageLikes      ImageLike[]
   patients        User[]            @relation("TherapistPatients")
-  therapist       User?             @relation("TherapistPatients", fields: [therapistId], references: [id])
+  therapist       User?             @relation("TherapistPatients", fields: [therapistId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([therapistId])
 }
 
 model Profile {
-  id                    String   @id @default(uuid())
-  userId                String   @unique
+  id                    String    @id @default(uuid())
+  userId                String    @unique
   name                  String?
   age                   Int?
-  category              String   @default("general")
+  category              String    @default("general")
   therapyGoals          String?
   mainConcerns          String?
-  preferredStyle        String   @default("neutral")
+  preferredStyle        String    @default("neutral")
   interests             String[]
   preferences           String?
   additionalInfo        String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  avatarLevel           Int      @default(1)
-  isSharedWithTherapist Boolean  @default(false)
-  attentionScore        Int      @default(0)
-  sleepHours            Int?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  avatarLevel           Int       @default(1)
+  isSharedWithTherapist Boolean   @default(false)
+  attentionScore        Int       @default(0)
+  sleepHours            Float?
   stepsCount            Int?
   heartRateAvg          Int?
-  user                  User     @relation(fields: [userId], references: [id])
+  aiDataConsentAt       DateTime?
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ImageAnalysis {
-  id               String   @id @default(uuid())
-  userId           String
-  prompt           String
-  result           String
-  imageUrl         String?
-  date             DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  isPublic         Boolean  @default(false)
-  likes            Int      @default(0)
-  tokensPrompt     Int      @default(0)
-  tokensCompletion Int      @default(0)
-  cost             Float    @default(0)
-  user             User     @relation(fields: [userId], references: [id])
+  id                   String      @id @default(uuid())
+  userId               String
+  prompt               String
+  result               String
+  imageUrl             String?
+  imageStorageKey      String?
+  imageMimeType        String?
+  originalImageName    String?
+  extendedQuestions    Json?
+  extendedAnalysisText String?
+  date                 DateTime    @default(now())
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  isPublic             Boolean     @default(false)
+  likes                Int         @default(0)
+  tokensPrompt         Int         @default(0)
+  tokensCompletion     Int         @default(0)
+  cost                 Float       @default(0)
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likedBy              ImageLike[]
+
+  @@index([userId, date])
+  @@index([isPublic, date])
+}
+
+model ImageLike {
+  id        String        @id @default(uuid())
+  userId    String
+  imageId   String
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  image     ImageAnalysis @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, imageId])
+  @@index([imageId])
 }
 
 model Challenge {
@@ -98,8 +125,8 @@ model UserChallenge {
   userId      String
   challengeId String
   completed   Boolean   @default(false)
-  challenge   Challenge @relation(fields: [challengeId], references: [id])
-  user        User      @relation(fields: [userId], references: [id])
+  challenge   Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, challengeId])
 }
@@ -113,7 +140,9 @@ model DiaryEntry {
   updatedAt DateTime @updatedAt
   riskLevel String   @default("low")
   tags      String[]
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
 }
 
 model ChatSession {
@@ -129,7 +158,9 @@ model ChatSession {
   cost             Float         @default(0)
   tags             String[]
   messages         ChatMessage[]
-  user             User          @relation(fields: [userId], references: [id])
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
 }
 
 model ChatMessage {
@@ -142,6 +173,8 @@ model ChatMessage {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   session          ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 model Course {
@@ -203,22 +236,24 @@ model Submission {
   submissionDate   DateTime @default(now())
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  homework         Homework @relation(fields: [homeworkId], references: [id])
-  user             User     @relation(fields: [userId], references: [id])
+  homework         Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, homeworkId])
 }
 
 model CourseProgress {
-  id           String   @id @default(uuid())
-  userId       String
-  courseId     String
-  progress     Int      @default(0)
-  lastAccessed DateTime @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  course       Course   @relation(fields: [courseId], references: [id])
-  user         User     @relation(fields: [userId], references: [id])
+  id               String   @id @default(uuid())
+  userId           String
+  courseId         String
+  progress         Int      @default(0)
+  rewardedProgress Int      @default(0)
+  completedLessons String[] @default([])
+  lastAccessed     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  course           Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, courseId])
 }
@@ -237,8 +272,8 @@ model UserAchievement {
   userId        String
   achievementId String
   earnedAt      DateTime    @default(now())
-  achievement   Achievement @relation(fields: [achievementId], references: [id])
-  user          User        @relation(fields: [userId], references: [id])
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, achievementId])
 }
@@ -250,18 +285,22 @@ model SentimentTrend {
   score     Int
   tags      String[]
   date      DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  title     String
-  message   String
-  type      String   @default("info")
-  isRead    Boolean  @default(false)
-  date      DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+  id      String   @id @default(uuid())
+  userId  String
+  title   String
+  message String
+  type    String   @default("info")
+  isRead  Boolean  @default(false)
+  date    DateTime @default(now())
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, date])
 }
 
 model PeerSupportMessage {
@@ -270,7 +309,9 @@ model PeerSupportMessage {
   content        String
   authorTitle    String
   createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
 }
 
 enum Role {

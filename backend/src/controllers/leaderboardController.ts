@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 
 export const getLeaderboard = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const topUsers = await prisma.user.findMany({
       take: 10,
@@ -22,8 +23,10 @@ export const getLeaderboard = async (req: AuthRequest, res: Response) => {
 
     const formatted = topUsers.map((u, index) => ({
       rank: index + 1,
-      id: u.id,
-      name: u.profile?.name || 'Anonymous',
+      // Do not expose account UUIDs or profile names to other community members.
+      id: u.id === req.user!.id ? 'self' : `rank-${index + 1}`,
+      name: u.id === req.user!.id ? u.profile?.name || 'Вы' : `Участник ${index + 1}`,
+      isCurrentUser: u.id === req.user!.id,
       points: u.points,
       streak: u.streak,
       level: u.profile?.avatarLevel || 1,

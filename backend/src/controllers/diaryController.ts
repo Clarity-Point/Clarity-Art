@@ -6,6 +6,7 @@ import { analyzeCrisisRisk } from '../services/crisisService';
 import { AIService } from '../services/aiService';
 import { AnalyticsService } from '../services/analyticsService';
 import { validateTextInput } from '../security/inputValidation';
+import { canUseConfiguredAI } from '../services/aiConsentService';
 
 export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -16,8 +17,9 @@ export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
   const safeContent = contentValidation.value;
 
   try {
-    const riskLevel = await analyzeCrisisRisk(safeContent);
-    const tags = await AIService.extractTags(safeContent);
+    const allowProvider = await canUseConfiguredAI(req.user.id);
+    const riskLevel = await analyzeCrisisRisk(safeContent, allowProvider);
+    const tags = await AIService.extractTags(safeContent, allowProvider);
 
     // Log trend
     await AnalyticsService.logSentiment(req.user.id, riskLevel, tags, safeContent);
@@ -45,11 +47,19 @@ export const getDiaryEntries = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
   try {
+    const requestedLimit = Number(req.query.limit || 50);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(100, Math.max(1, requestedLimit))
+      : 50;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
     const entries = await prisma.diaryEntry.findMany({
       where: { userId: req.user.id },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-    res.json(entries);
+    if (entries.length > limit) res.setHeader('X-Next-Cursor', entries[limit - 1].id);
+    res.json(entries.slice(0, limit));
   } catch {
     res.status(500).json({ error: 'Error fetching diary entries' });
   }
@@ -60,6 +70,8 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
 
   const id = req.params.id as string;
   const { content } = req.body;
+  const contentValidation = validateTextInput(content, 5_000);
+  if (!contentValidation.ok) return res.status(400).json({ error: contentValidation.error });
 
   try {
     const entry = await prisma.diaryEntry.findUnique({ where: { id } });
@@ -69,7 +81,7 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
 
     const updated = await prisma.diaryEntry.update({
       where: { id },
-      data: { content, updatedAt: new Date() },
+      data: { content: contentValidation.value, updatedAt: new Date() },
     });
 
     res.json(updated);

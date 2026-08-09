@@ -21,6 +21,10 @@ export function useProfileForm() {
   const storeProfileRef = storeToRefs(userProfileStore).profile;
 
   const isSyncing = ref(false);
+  const profileMessage = ref('');
+  const healthMessage = ref('');
+  const therapistMessage = ref('');
+  const therapists = ref<Array<{ id: string; name: string }>>([]);
 
   const profile = ref({
     name: '',
@@ -39,7 +43,7 @@ export function useProfileForm() {
     therapistId: '',
   });
 
-  onMounted(() => {
+  onMounted(async () => {
     if (storeProfileRef.value) {
       profile.value.name = storeProfileRef.value.name || '';
       profile.value.age = storeProfileRef.value.age ?? null;
@@ -58,17 +62,25 @@ export function useProfileForm() {
       profile.value.isSharedWithTherapist = storeProfileRef.value.isSharedWithTherapist || false;
       profile.value.therapistId = storeProfileRef.value.therapistId || '';
     }
+    try {
+      therapists.value = (await axios.get(`${API_URL}/therapists`)).data;
+    } catch {
+      therapistMessage.value = 'Не удалось загрузить список терапевтов.';
+    }
   });
 
   // Persist the manually-entered metrics. Works with any device: the user reads
   // heart rate / steps / sleep off whatever watch or tracker they use and enters
   // them here — no vendor lock-in to Apple Health or Google Fit.
   const saveHealthData = async () => {
-    await userProfileStore.updateProfile({
+    healthMessage.value = '';
+    const saved = await userProfileStore.updateProfile({
       sleepHours: profile.value.sleepHours,
       heartRateAvg: profile.value.heartRateAvg,
       stepsCount: profile.value.stepsCount,
     });
+    healthMessage.value = saved ? 'Показатели сохранены.' : 'Не удалось сохранить показатели.';
+    return saved;
   };
 
   // Explicit demo helper: fills the metrics with sample values so previews and
@@ -82,23 +94,38 @@ export function useProfileForm() {
       profile.value.sleepHours = 7.5;
       await saveHealthData();
       isSyncing.value = false;
-      alert('Загружены демонстрационные данные о здоровье.');
+      healthMessage.value = 'Демонстрационные показатели загружены и сохранены.';
     }, 800);
   };
 
   const saveTherapistSettings = async () => {
-    await axios.put(`${API_URL}/profile/therapist-access`, {
-      isSharedWithTherapist: profile.value.isSharedWithTherapist,
-      therapistId: profile.value.therapistId,
-    });
-    userProfileStore.updateProfile({
-      isSharedWithTherapist: profile.value.isSharedWithTherapist,
-      therapistId: profile.value.therapistId,
-    });
+    therapistMessage.value = '';
+    if (profile.value.isSharedWithTherapist && !profile.value.therapistId.trim()) {
+      therapistMessage.value = 'Введите ID терапевта и нажмите «Сохранить доступ».';
+      return false;
+    }
+    try {
+      await axios.put(`${API_URL}/profile/therapist-access`, {
+        isSharedWithTherapist: profile.value.isSharedWithTherapist,
+        therapistId: profile.value.therapistId.trim(),
+      });
+      userProfileStore.hydrateProfile({
+        ...storeProfileRef.value,
+        isSharedWithTherapist: profile.value.isSharedWithTherapist,
+        therapistId: profile.value.therapistId.trim(),
+      });
+      therapistMessage.value = 'Настройки доступа сохранены.';
+      return true;
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? error.response?.data?.error : undefined;
+      therapistMessage.value = message || 'Не удалось сохранить настройки доступа.';
+      return false;
+    }
   };
 
-  const saveProfile = () => {
-    userProfileStore.updateProfile({
+  const saveProfile = async () => {
+    profileMessage.value = '';
+    const saved = await userProfileStore.updateProfile({
       name: profile.value.name,
       age: profile.value.age,
       therapyGoals: profile.value.goals,
@@ -112,12 +139,16 @@ export function useProfileForm() {
       preferences: profile.value.preferences,
       additionalInfo: profile.value.additionalInfo,
     });
-    alert('Профиль успешно сохранен!');
+    profileMessage.value = saved ? 'Профиль сохранён.' : 'Не удалось сохранить профиль.';
   };
 
   return {
     profile,
     isSyncing,
+    profileMessage,
+    healthMessage,
+    therapistMessage,
+    therapists,
     loadSampleHealthData,
     saveHealthData,
     saveTherapistSettings,

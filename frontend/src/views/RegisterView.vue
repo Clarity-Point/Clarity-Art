@@ -54,6 +54,7 @@
               id="password"
               v-model="password"
               required
+              minlength="8"
               autocomplete="new-password"
               placeholder="Минимум 8 символов"
             />

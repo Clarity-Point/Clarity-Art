@@ -19,10 +19,17 @@
       </div>
     </div>
 
+    <div v-else-if="errorMessage" class="empty-state">
+      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+      <p>{{ errorMessage }}</p>
+      <button class="btn-outline" @click="fetchGallery">Повторить</button>
+    </div>
+
     <div v-else-if="galleryItems.length" class="grid grid-auto">
       <article v-for="item in galleryItems" :key="item.id" class="gallery-card card-hoverable">
         <div class="gallery-cover">
-          <Icon name="palette" :size="30" />
+          <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.prompt" loading="lazy" />
+          <Icon v-else name="palette" :size="30" />
         </div>
         <div class="gallery-body">
           <div class="gallery-author row">
@@ -76,24 +83,29 @@ interface GalleryItem {
   prompt: string;
   result: string;
   likes: number;
+  imageUrl?: string;
 }
 
 const galleryItems = ref<GalleryItem[]>([]);
 const isLoading = ref(true);
+const errorMessage = ref('');
 
 const fetchGallery = async () => {
   try {
+    isLoading.value = true;
+    errorMessage.value = '';
     const response = await axios.get(`${API_URL}/gallery`);
     galleryItems.value = response.data;
   } catch (error) {
     console.error('Failed to fetch gallery:', error);
+    errorMessage.value = 'Не удалось загрузить галерею. Проверьте соединение.';
+  } finally {
+    isLoading.value = false;
   }
 };
 
 onMounted(async () => {
-  isLoading.value = true;
   await fetchGallery();
-  isLoading.value = false;
 });
 
 const like = async (id: string) => {
@@ -149,6 +161,11 @@ const previewOf = (result: string) => {
   justify-content: center;
   color: var(--primary-color);
   background: linear-gradient(135deg, var(--primary-soft), var(--accent-soft));
+}
+.gallery-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .gallery-cover-skeleton {
   height: 140px;

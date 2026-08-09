@@ -4,6 +4,7 @@ import { defineStore } from 'pinia';
 const ANALYTICS_STORAGE_KEY = 'appAnalyticsData';
 
 interface AnalyticsState {
+  ownerId: string | null;
   currentStreak: number;
   lastActivityDate: string | null; // Store date as YYYY-MM-DD string
   activityHistory: Record<string, { sessions: number }>; // YYYY-MM-DD -> { sessions: count }
@@ -11,11 +12,12 @@ interface AnalyticsState {
 
 export const useAnalyticsStore = defineStore('analytics', () => {
   const getInitialState = (): AnalyticsState => {
-    const savedData = localStorage.getItem(ANALYTICS_STORAGE_KEY);
+    const savedData = window.localStorage.getItem(ANALYTICS_STORAGE_KEY);
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
         return {
+          ownerId: typeof parsed.ownerId === 'string' ? parsed.ownerId : null,
           currentStreak: typeof parsed.currentStreak === 'number' ? parsed.currentStreak : 0,
           lastActivityDate:
             typeof parsed.lastActivityDate === 'string' ? parsed.lastActivityDate : null,
@@ -29,6 +31,7 @@ export const useAnalyticsStore = defineStore('analytics', () => {
       }
     }
     return {
+      ownerId: null,
       currentStreak: 0, // Start at 0, first activity makes it 1
       lastActivityDate: null,
       activityHistory: {},
@@ -41,7 +44,7 @@ export const useAnalyticsStore = defineStore('analytics', () => {
     state,
     (newStateValue) => {
       try {
-        localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(newStateValue));
+        window.localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(newStateValue));
       } catch (e) {
         console.error('Failed to save analytics data to localStorage', e);
       }
@@ -107,10 +110,21 @@ export const useAnalyticsStore = defineStore('analytics', () => {
   const activityHistory = computed(() => state.value.activityHistory);
 
   /** Align the client-side streak with the authoritative value from the server. */
-  function hydrateStreak(serverStreak: number) {
-    if (typeof serverStreak === 'number' && serverStreak > state.value.currentStreak) {
-      state.value.currentStreak = serverStreak;
+  function hydrateStreak(serverStreak: number, ownerId: string) {
+    if (state.value.ownerId !== ownerId) {
+      state.value = {
+        ownerId,
+        currentStreak: serverStreak,
+        lastActivityDate: null,
+        activityHistory: {},
+      };
+      return;
     }
+    state.value.currentStreak = serverStreak;
+  }
+
+  function clearUserAnalytics() {
+    state.value = { ownerId: null, currentStreak: 0, lastActivityDate: null, activityHistory: {} };
   }
 
   return {
@@ -119,5 +133,6 @@ export const useAnalyticsStore = defineStore('analytics', () => {
     activityHistory, // Expose the activity history
     recordActivity,
     hydrateStreak,
+    clearUserAnalytics,
   };
 });

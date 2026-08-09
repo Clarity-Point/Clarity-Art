@@ -21,7 +21,10 @@ const HIGH_RISK_KEYWORDS = [
   'suicide',
 ];
 
-export const analyzeCrisisRisk = async (text: string): Promise<CrisisSignal> => {
+export const analyzeCrisisRisk = async (
+  text: string,
+  allowProvider = true,
+): Promise<CrisisSignal> => {
   const normalized = text.toLowerCase();
 
   // This is a conservative keyword safety signal. It is not a diagnosis and can
@@ -32,7 +35,7 @@ export const analyzeCrisisRisk = async (text: string): Promise<CrisisSignal> => 
 
   // Do not silently label a person as low-risk when automated screening is not
   // available. The caller can show a neutral availability/safety notice instead.
-  if (!AI_ENABLED) {
+  if (!AI_ENABLED || !allowProvider) {
     return 'unavailable';
   }
 

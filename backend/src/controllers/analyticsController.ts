@@ -11,13 +11,13 @@ export const getMoodStats = async (req: AuthRequest, res: Response) => {
   try {
     const sessions = await prisma.chatSession.findMany({
       where: { userId: req.user.id, riskLevel: { in: ['low', 'medium', 'high'] } },
-      orderBy: { date: 'asc' },
+      orderBy: { date: 'desc' },
       take: 30, // Last 30 sessions
       select: { date: true, riskLevel: true },
     });
 
     // Map riskLevel to numeric sentiment (low=3, medium=2, high=1)
-    const stats = sessions.map((s) => ({
+    const stats = sessions.reverse().map((s) => ({
       date: s.date,
       score: s.riskLevel === 'high' ? 1 : s.riskLevel === 'medium' ? 2 : 3,
     }));

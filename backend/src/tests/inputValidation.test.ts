@@ -12,11 +12,12 @@ describe('input validation', () => {
   });
 
   it('accepts a supported image MIME type within the byte limit', () => {
-    expect(validateImageInput('image/png', 'aGVsbG8=', 10)).toEqual({ ok: true });
+    expect(validateImageInput('image/png', 'iVBORw0KGgo=', 10)).toEqual({ ok: true });
   });
 
   it('rejects unsupported MIME type and oversized image data', () => {
     expect(validateImageInput('image/svg+xml', 'aGVsbG8=', 10)).toMatchObject({ ok: false });
     expect(validateImageInput('image/png', 'a'.repeat(100), 10)).toMatchObject({ ok: false });
+    expect(validateImageInput('image/png', 'aGVsbG8=', 10)).toMatchObject({ ok: false });
   });
 });

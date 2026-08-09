@@ -15,9 +15,9 @@
         rows="2"
         aria-label="Новое анонимное сообщение"
       ></textarea>
-      <button @click="postMessage" :disabled="!newMessage.trim()" class="btn-primary">
+      <button @click="postMessage" :disabled="!newMessage.trim() || isSending" class="btn-primary">
         <Icon name="send" :size="16" />
-        Отправить
+        {{ isSending ? 'Отправляем…' : 'Отправить' }}
       </button>
     </div>
 
@@ -41,8 +41,10 @@
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
+import { useToastStore } from '@/stores/toastStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+const toastStore = useToastStore();
 
 interface PeerMessage {
   id: string;
@@ -53,6 +55,7 @@ interface PeerMessage {
 
 const messages = ref<PeerMessage[]>([]);
 const newMessage = ref('');
+const isSending = ref(false);
 
 const fetchMessages = async () => {
   try {
@@ -64,12 +67,17 @@ const fetchMessages = async () => {
 };
 
 const postMessage = async () => {
+  if (!newMessage.value.trim() || isSending.value) return;
+  isSending.value = true;
   try {
-    await axios.post(`${API_URL}/org/peer-support`, { content: newMessage.value });
+    await axios.post(`${API_URL}/org/peer-support`, { content: newMessage.value.trim() });
     newMessage.value = '';
     await fetchMessages();
+    toastStore.success('Сообщение поддержки опубликовано анонимно.');
   } catch {
-    alert('Ошибка при отправке');
+    toastStore.error('Не удалось отправить сообщение. Текст оставлен в форме.');
+  } finally {
+    isSending.value = false;
   }
 };
 

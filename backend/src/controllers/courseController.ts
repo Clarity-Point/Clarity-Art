@@ -2,7 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { progressSchema, homeworkSubmissionSchema } from '../schemas';
-import { rewardPoints } from '../middleware/gamification';
+import { checkAchievements } from '../middleware/gamification';
 import { asyncHandler } from '../middleware/asyncHandler';
 
 /**
@@ -27,8 +27,9 @@ export const getAllCourses = asyncHandler(async (req: AuthRequest, res: Response
     ...c,
     modules: c.modules.map((m) => ({
       ...m,
-      lessons: m.lessons.map((l) => ({ title: l.title })),
+      lessons: m.lessons,
     })),
+    relatedHomework: c.homework,
   }));
 
   res.json(formatted);
@@ -108,42 +109,53 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
   const validation = progressSchema.safeParse(req.body);
   if (!validation.success) return res.status(400).json({ error: validation.error.format() });
 
-  const { progress, lastAccessed } = validation.data;
+  const { progress, lastAccessed, completedLessons } = validation.data;
 
   const course = await prisma.course.findUnique({ where: { slug: courseSlug } });
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
-  const oldProgress = await prisma.courseProgress.findUnique({
-    where: {
-      userId_courseId: { userId: req.user.id, courseId: course.id },
-    },
-  });
+  const diff = await prisma.$transaction(
+    async (tx) => {
+      const oldProgress = await tx.courseProgress.findUnique({
+        where: { userId_courseId: { userId: req.user!.id, courseId: course.id } },
+      });
+      const previousRewarded = oldProgress?.rewardedProgress || 0;
+      const nextRewarded = Math.max(previousRewarded, progress);
+      const persistedProgress = Math.max(oldProgress?.progress || 0, progress);
+      const persistedLessons = completedLessons
+        ? [...new Set([...(oldProgress?.completedLessons || []), ...completedLessons])]
+        : oldProgress?.completedLessons || [];
 
-  // Progress is a monotonic high-water mark: it never decreases. This keeps
-  // points honest — you can't farm them by oscillating progress up and down.
-  const previous = oldProgress?.progress || 0;
-  const nextProgress = Math.max(previous, progress);
+      await tx.courseProgress.upsert({
+        where: { userId_courseId: { userId: req.user!.id, courseId: course.id } },
+        update: {
+          progress: persistedProgress,
+          rewardedProgress: nextRewarded,
+          completedLessons: persistedLessons,
+          lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
+        },
+        create: {
+          userId: req.user!.id,
+          courseId: course.id,
+          progress: persistedProgress,
+          rewardedProgress: nextRewarded,
+          completedLessons: persistedLessons,
+          lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
+        },
+      });
 
-  await prisma.courseProgress.upsert({
-    where: {
-      userId_courseId: { userId: req.user.id, courseId: course.id },
+      const earnedProgress = nextRewarded - previousRewarded;
+      if (earnedProgress > 0) {
+        await tx.user.update({
+          where: { id: req.user!.id },
+          data: { points: { increment: earnedProgress * 2 } },
+        });
+      }
+      return earnedProgress;
     },
-    update: {
-      progress: nextProgress,
-      lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
-    },
-    create: {
-      userId: req.user.id,
-      courseId: course.id,
-      progress: nextProgress,
-      lastAccessed: lastAccessed ? new Date(lastAccessed) : new Date(),
-    },
-  });
-
-  const diff = nextProgress - previous;
-  if (diff > 0) {
-    await rewardPoints(req.user.id, diff * 2, `Course progress: ${course.title}`);
-  }
+    { isolationLevel: 'Serializable' },
+  );
+  if (diff > 0) await checkAchievements(req.user.id);
 
   res.json({ message: 'Progress updated' });
 });
@@ -182,27 +194,32 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
   // Homework is one submission per user (schema @@unique). Allow re-submission by
   // updating in place, but award the 30 points only the first time so they can't
   // be farmed by submitting repeatedly.
-  const existing = await prisma.submission.findUnique({
-    where: { userId_homeworkId: { userId: req.user.id, homeworkId } },
-  });
-
-  const submission = existing
-    ? await prisma.submission.update({
-        where: { userId_homeworkId: { userId: req.user.id, homeworkId } },
-        data: { submittedContent, submissionDate: new Date() },
-      })
-    : await prisma.submission.create({
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const inserted = await tx.submission.createMany({
         data: {
-          userId: req.user.id,
+          userId: req.user!.id,
           homeworkId,
           submittedContent,
           submissionDate: new Date(),
         },
+        skipDuplicates: true,
       });
+      const submission = await tx.submission.update({
+        where: { userId_homeworkId: { userId: req.user!.id, homeworkId } },
+        data: { submittedContent, submissionDate: new Date() },
+      });
+      if (inserted.count === 1) {
+        await tx.user.update({
+          where: { id: req.user!.id },
+          data: { points: { increment: 30 } },
+        });
+      }
+      return { submission, pointsAwarded: inserted.count === 1 ? 30 : 0 };
+    },
+    { isolationLevel: 'Serializable' },
+  );
 
-  if (!existing) {
-    await rewardPoints(req.user.id, 30, 'Homework submission');
-  }
-
-  res.json({ message: 'Homework submitted', submission, pointsAwarded: existing ? 0 : 30 });
+  if (result.pointsAwarded > 0) await checkAchievements(req.user.id);
+  res.json({ message: 'Homework submitted', ...result });
 });

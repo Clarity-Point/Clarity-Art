@@ -194,7 +194,6 @@ const showEmergency = ref(false);
 // Onboarding hint — shown until the user dismisses it once.
 const showOnboarding = ref(false);
 onMounted(() => {
-  if (authStore.isAuthenticated) authStore.fetchProfile();
   showOnboarding.value = localStorage.getItem('onboarding-dismissed') !== '1';
 });
 function dismissOnboarding() {

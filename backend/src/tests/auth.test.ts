@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     user: {
+      findUnique: vi.fn(),
+    },
+    profile: {
       findUnique: vi.fn(),
     },
   },
@@ -33,6 +37,7 @@ describe('Auth API', () => {
       role: 'USER',
       points: 0,
       streak: 0,
+      sessionVersion: 0,
       profile: { name: 'User' },
     });
 
@@ -46,5 +51,29 @@ describe('Auth API', () => {
       expect.arrayContaining([expect.stringContaining('ty_session=')]),
     );
     expect(String(res.headers['set-cookie'])).toContain('HttpOnly');
+  });
+
+  it('rejects a session after its server-side version is revoked', async () => {
+    const token = jwt.sign(
+      {
+        id: 'user-1',
+        email: 'user@example.com',
+        role: 'USER',
+        sessionVersion: 1,
+      },
+      process.env.JWT_SECRET!,
+    );
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      role: 'USER',
+      sessionVersion: 2,
+    });
+
+    const res = await request(app).get('/api/ai/status').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Invalidated session');
+    expect(prismaMock.profile.findUnique).not.toHaveBeenCalled();
   });
 });

@@ -10,20 +10,29 @@ export const rewardPoints = async (userId: string, points: number, _reason?: str
     where: { id: userId },
     data: { points: { increment: points } },
   });
-  // In a real app, we might log the reason to a PointHistory table
-  await checkAchievements(userId);
+  // A secondary achievement calculation must not turn an already persisted
+  // diary/chat/image action into a false 500 response.
+  try {
+    await checkAchievements(userId);
+  } catch (error) {
+    console.error('Achievement calculation error:', error);
+  }
 };
 
 export const checkAchievements = async (userId: string) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
-      achievements: true,
-      diaryEntries: true,
-      courseProgress: true,
-      imageAnalyses: true,
-      chatSessions: true,
-      submissions: true,
+      achievements: { select: { achievementId: true } },
+      courseProgress: { select: { progress: true } },
+      _count: {
+        select: {
+          diaryEntries: true,
+          imageAnalyses: true,
+          chatSessions: true,
+          submissions: true,
+        },
+      },
     },
   });
 
@@ -40,7 +49,7 @@ export const checkAchievements = async (userId: string) => {
 
     switch (type) {
       case 'DIARY_COUNT':
-        if (user.diaryEntries.length >= targetValue) achieved = true;
+        if (user._count.diaryEntries >= targetValue) achieved = true;
         break;
       case 'COURSE_COMPLETED': {
         const completed = user.courseProgress.filter((cp) => cp.progress === 100).length;
@@ -51,36 +60,42 @@ export const checkAchievements = async (userId: string) => {
         if (user.streak >= targetValue) achieved = true;
         break;
       case 'IMAGE_ANALYSIS_COUNT':
-        if (user.imageAnalyses.length >= targetValue) achieved = true;
+        if (user._count.imageAnalyses >= targetValue) achieved = true;
         break;
       case 'CHAT_COUNT':
-        if (user.chatSessions.length >= targetValue) achieved = true;
+        if (user._count.chatSessions >= targetValue) achieved = true;
         break;
       case 'HOMEWORK_COUNT':
-        if (user.submissions.length >= targetValue) achieved = true;
+        if (user._count.submissions >= targetValue) achieved = true;
         break;
     }
 
     if (achieved) {
-      await prisma.userAchievement.create({
-        data: { userId, achievementId: ach.id },
+      const inserted = await prisma.userAchievement.createMany({
+        data: [{ userId, achievementId: ach.id }],
+        skipDuplicates: true,
       });
-      // Reward points for achievement
-      await prisma.user.update({
-        where: { id: userId },
-        data: { points: { increment: 100 } },
-      });
+      if (inserted.count > 0) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { points: { increment: 100 } },
+        });
+      }
     }
   }
 
   // Update Avatar Level based on points - More granular
   // Level 1: 0, Level 2: 100, Level 3: 300, Level 4: 600, Level 5: 1000, Level 6: 1500
+  const currentPoints = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { points: true },
+  });
   let newLevel = 1;
-  if (user.points >= 1500) newLevel = 6;
-  else if (user.points >= 1000) newLevel = 5;
-  else if (user.points >= 600) newLevel = 4;
-  else if (user.points >= 300) newLevel = 3;
-  else if (user.points >= 100) newLevel = 2;
+  if ((currentPoints?.points || 0) >= 1500) newLevel = 6;
+  else if ((currentPoints?.points || 0) >= 1000) newLevel = 5;
+  else if ((currentPoints?.points || 0) >= 600) newLevel = 4;
+  else if ((currentPoints?.points || 0) >= 300) newLevel = 3;
+  else if ((currentPoints?.points || 0) >= 100) newLevel = 2;
 
   await prisma.profile.update({
     where: { userId: user.id },
@@ -102,13 +117,19 @@ export const updateStreak = async (req: AuthRequest, res: Response, next: NextFu
     const isNewDay = now.toDateString() !== lastActivity.toDateString();
 
     if (isNewDay) {
-      const diffTime = Math.abs(now.getTime() - lastActivity.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const currentDay = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      const previousDay = Date.UTC(
+        lastActivity.getFullYear(),
+        lastActivity.getMonth(),
+        lastActivity.getDate(),
+      );
+      const diffDays = Math.round((currentDay - previousDay) / (1000 * 60 * 60 * 24));
 
       if (diffDays === 1) {
-        // Increment streak
-        await prisma.user.update({
-          where: { id: user.id },
+        // Match the observed timestamp so parallel requests can award the daily
+        // streak only once.
+        await prisma.user.updateMany({
+          where: { id: user.id, lastActivity: user.lastActivity },
           data: {
             streak: { increment: 1 },
             lastActivity: now,
@@ -116,9 +137,8 @@ export const updateStreak = async (req: AuthRequest, res: Response, next: NextFu
           },
         });
       } else if (diffDays > 1) {
-        // Reset streak
-        await prisma.user.update({
-          where: { id: user.id },
+        await prisma.user.updateMany({
+          where: { id: user.id, lastActivity: user.lastActivity },
           data: {
             streak: 1,
             lastActivity: now,

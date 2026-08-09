@@ -76,6 +76,9 @@
 import { ref, computed } from 'vue';
 import DOMPurify from 'dompurify';
 import Icon from '@/components/Icon.vue';
+import artIntroImage from '@/assets/vvedenie-v-art.jpeg';
+import emotionImage from '@/assets/razvitie_emotii.jpeg';
+import musicImage from '@/assets/tvorvhestvo-dlya-vseh.jpg';
 
 const searchQuery = ref('');
 interface Article {
@@ -103,8 +106,7 @@ const articles = [
     excerpt: 'Узнайте, как творчество помогает выражать эмоции и находить внутренний покой.',
     content:
       '<p>Арт-терапия — это направление в психотерапии и психологической коррекции, основанное на искусстве и творчестве...</p><p>В процессе творчества человек может выразить то, что сложно облечь в слова. Это особенно важно при работе с травмами и стрессом...</p>',
-    image:
-      'https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=800&q=80',
+    image: artIntroImage,
     readTime: 5,
   },
   {
@@ -114,8 +116,7 @@ const articles = [
     excerpt: 'Простые упражнения, которые можно выполнить дома за 15 минут.',
     content:
       '<p>1. Нейрографика: рисование линий и сглаживание углов...</p><p>2. Метод мандалы: работа в круге для центрирования...</p>',
-    image:
-      'https://images.unsplash.com/photo-1547826039-bfc35e0f1ea8?auto=format&fit=crop&w=800&q=80',
+    image: emotionImage,
     readTime: 8,
   },
   {
@@ -124,8 +125,7 @@ const articles = [
     category: 'Музыка',
     excerpt: 'Научный взгляд на влияние ритма и мелодии на мозг.',
     content: '<p>Музыка активирует лимбическую систему мозга, отвечающую за эмоции...</p>',
-    image:
-      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80',
+    image: musicImage,
     readTime: 6,
   },
 ];

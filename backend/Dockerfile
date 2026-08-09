@@ -52,7 +52,9 @@ ENV NODE_ENV=production \
 
 # dumb-init reaps zombies and forwards SIGTERM, so graceful shutdown actually
 # fires when the container is stopped.
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init ttf-dejavu \
+ && mkdir -p /app/data/images \
+ && chown -R node:node /app/data
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/backend/dist ./backend/dist

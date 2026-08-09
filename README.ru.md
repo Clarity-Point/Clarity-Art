@@ -146,6 +146,7 @@ AI_VISION_MODEL=llava                    # для анализа рисунко�
 npm run lint                                               # eslint (корень)
 cd backend  && npm test && npx tsc --noEmit                # vitest + типы
 cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json   # типы фронтенда
+cd frontend && npm test                                  # тесты фронтенда
 cd frontend && npm run build                               # production-сборка
 ```
 
@@ -194,6 +195,10 @@ cd frontend && npm run build                               # production-сбор
 Оба образа поставляются с Docker `HEALTHCHECK`, а бэкенд корректно завершает
 работу по `SIGTERM` (сначала дренирует соединения, отключает Prisma, затем
 выходит).
+
+Для публичного
+HTTPS-развёртывания также задайте `COOKIE_SECURE=true`, завершайте TLS на обратном
+прокси и не открывайте PostgreSQL наружу.
 
 ## Демо-данные
 

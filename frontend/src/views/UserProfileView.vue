@@ -142,6 +142,9 @@
         <button type="submit" class="btn-primary btn-block">
           <Icon name="check" :size="18" /> Сохранить профиль
         </button>
+        <p v-if="profileMessage" class="submission-feedback" role="status">
+          {{ profileMessage }}
+        </p>
       </form>
 
       <section class="card stack">
@@ -236,18 +239,21 @@
           </div>
         </div>
 
+        <p v-if="healthMessage" class="submission-feedback" role="status">
+          {{ healthMessage }}
+        </p>
         <div class="health-correlation-hint" v-if="storeProfileRef.stepsCount > 0">
-          <Icon name="lightbulb" :size="16" /> Замечено: ваше настроение на 20% стабильнее в дни,
-          когда вы проходите более 5000 шагов.
+          <Icon name="lightbulb" :size="16" /> Показатели сохранены. Сопоставляйте их с дневником в
+          разделе аналитики — приложение не делает медицинских выводов.
         </div>
       </section>
 
       <section class="card stack">
         <div class="section-head"><h2 class="section-title">Сводка о состоянии</h2></div>
         <div v-if="analyticsSummary" class="stack summary-content">
-          <p><strong>Общее настроение:</strong> {{ analyticsSummary.mood }}</p>
-          <p><strong>Ключевые темы в работах:</strong> {{ analyticsSummary.themes.join(', ') }}</p>
-          <p><strong>Рекомендация:</strong> {{ analyticsSummary.recommendation }}</p>
+          <p><strong>Активность:</strong> {{ analyticsSummary.activity }}</p>
+          <p><strong>Что уже накоплено:</strong> {{ analyticsSummary.sources.join(', ') }}</p>
+          <p><strong>Следующий шаг:</strong> {{ analyticsSummary.nextStep }}</p>
         </div>
         <div v-else class="empty-state">
           <span class="empty-icon"><Icon name="bar-chart" :size="26" /></span>
@@ -268,6 +274,17 @@
 
     <!-- History tab -->
     <section v-else-if="activeTab === 'history'" class="tab-panel stack">
+      <div
+        v-if="
+          storeProfileRef.dataTruncated &&
+          Object.values(storeProfileRef.dataTruncated).some(Boolean)
+        "
+        class="card history-limit-notice"
+        role="status"
+      >
+        В профиле показана последняя активность. Полная история без сокращений доступна в
+        JSON-архиве на вкладке «Данные и специалист».
+      </div>
       <section class="card stack">
         <div class="section-head"><h2 class="section-title">Анализ изображений</h2></div>
         <div
@@ -464,25 +481,66 @@
     <!-- Therapist & data tab -->
     <section v-else-if="activeTab === 'therapist'" class="tab-panel stack">
       <section class="card stack">
+        <div class="section-head"><h2 class="section-title">AI и обработка данных</h2></div>
+        <div v-if="isAiStatusLoading" class="skeleton" style="height: 70px"></div>
+        <template v-else-if="aiStatus">
+          <p v-if="!aiStatus.configured" class="muted">
+            AI-провайдер не настроен. Приложение использует безопасные локальные заготовки и не
+            отправляет ваши данные во внешние сервисы.
+          </p>
+          <p v-else-if="aiStatus.processingMode === 'local'" class="muted">
+            AI работает локально внутри этого развёртывания. Дневник, изображения и сообщения не
+            передаются внешнему провайдеру.
+          </p>
+          <template v-else>
+            <p class="muted">
+              Для AI-функций настроен внешний провайдер. Без вашего явного согласия чат, рисунки и
+              профиль не будут ему отправлены; дневник продолжит работать на локальных правилах.
+            </p>
+            <label class="switch-row">
+              <span>Разрешить передачу данных внешнему AI-провайдеру</span>
+              <input
+                type="checkbox"
+                :checked="aiStatus.consentGiven"
+                :disabled="isAiConsentSaving"
+                @change="onConsentChange"
+              />
+            </label>
+            <p class="faint">Согласие можно отозвать в любой момент.</p>
+          </template>
+        </template>
+      </section>
+
+      <section class="card stack">
         <div class="section-head"><h2 class="section-title">Связь с терапевтом</h2></div>
         <label class="switch-row">
           <span>Поделиться данными с терапевтом</span>
           <input
             type="checkbox"
             v-model="profile.isSharedWithTherapist"
-            @change="saveTherapistSettings"
+            @change="!profile.isSharedWithTherapist && saveTherapistSettings()"
           />
         </label>
         <div class="form-group" v-if="profile.isSharedWithTherapist">
-          <label for="therapistId">ID вашего терапевта</label>
-          <input
-            id="therapistId"
-            type="text"
-            v-model="profile.therapistId"
-            placeholder="Введите ID"
-            @change="saveTherapistSettings"
-          />
+          <label for="therapistId">Выберите терапевта</label>
+          <select id="therapistId" v-model="profile.therapistId">
+            <option value="">Не выбран</option>
+            <option v-for="therapist in therapists" :key="therapist.id" :value="therapist.id">
+              {{ therapist.name }}
+            </option>
+          </select>
         </div>
+        <button
+          v-if="profile.isSharedWithTherapist"
+          class="btn-primary"
+          :disabled="!profile.therapistId.trim()"
+          @click="saveTherapistSettings"
+        >
+          Сохранить доступ
+        </button>
+        <p v-if="therapistMessage" class="submission-feedback" role="status">
+          {{ therapistMessage }}
+        </p>
       </section>
 
       <section class="card stack">
@@ -508,6 +566,9 @@
           >
             <Icon name="building" :size="18" /> Панель администратора организации
           </RouterLink>
+          <button v-else type="button" class="btn-outline" @click="leaveOrganization">
+            Выйти из организации
+          </button>
         </div>
       </section>
 
@@ -520,6 +581,91 @@
         <button @click="downloadPDF" class="btn-accent" :disabled="isExporting">
           <Icon name="download" :size="18" />
           {{ isExporting ? 'Генерация…' : 'Скачать дневник (PDF)' }}
+        </button>
+      </section>
+
+      <form class="card stack" @submit.prevent="changePassword">
+        <div class="section-head"><h2 class="section-title">Безопасность аккаунта</h2></div>
+        <p class="muted">Используйте уникальный пароль длиной не менее 8 символов.</p>
+        <div class="form-group">
+          <label for="currentPassword">Текущий пароль</label>
+          <input
+            id="currentPassword"
+            v-model="passwordForm.currentPassword"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+        <div class="grid grid-2 form-grid">
+          <div class="form-group">
+            <label for="newPassword">Новый пароль</label>
+            <input
+              id="newPassword"
+              v-model="passwordForm.newPassword"
+              type="password"
+              minlength="8"
+              autocomplete="new-password"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="passwordConfirmation">Повторите новый пароль</label>
+            <input
+              id="passwordConfirmation"
+              v-model="passwordForm.confirmation"
+              type="password"
+              minlength="8"
+              autocomplete="new-password"
+              required
+            />
+          </div>
+        </div>
+        <button class="btn-outline" type="submit" :disabled="isChangingPassword">
+          <Icon name="shield" :size="18" />
+          {{ isChangingPassword ? 'Обновляем…' : 'Изменить пароль' }}
+        </button>
+      </form>
+
+      <section class="card stack danger-zone">
+        <div class="section-head"><h2 class="section-title">Данные и активные сеансы</h2></div>
+        <p class="muted">
+          Скачайте полный JSON-архив, завершите вход на всех устройствах или удалите аккаунт.
+        </p>
+        <div class="account-actions">
+          <button
+            class="btn-outline"
+            type="button"
+            :disabled="isManagingAccount"
+            @click="downloadAccountData"
+          >
+            <Icon name="download" :size="18" /> Скачать все данные
+          </button>
+          <button
+            class="btn-outline"
+            type="button"
+            :disabled="isManagingAccount"
+            @click="logoutAllSessions"
+          >
+            <Icon name="log-out" :size="18" /> Выйти на всех устройствах
+          </button>
+        </div>
+        <div class="form-group">
+          <label for="deleteAccountPassword">Текущий пароль для удаления аккаунта</label>
+          <input
+            id="deleteAccountPassword"
+            v-model="accountPassword"
+            type="password"
+            autocomplete="current-password"
+          />
+        </div>
+        <button
+          class="btn-outline danger-action"
+          type="button"
+          :disabled="isManagingAccount"
+          @click="deleteAccount"
+        >
+          <Icon name="trash" :size="18" /> Удалить аккаунт и все данные
         </button>
       </section>
     </section>
@@ -538,6 +684,7 @@ import Icon from '@/components/Icon.vue';
 import { useProfileForm } from '@/composables/useProfileForm';
 import { useProfileHistory } from '@/composables/useProfileHistory';
 import { useProfileActions } from '@/composables/useProfileActions';
+import { useAiConsent } from '@/composables/useAiConsent';
 
 const userProfileStore = useUserProfileStore();
 const storeProfileRef = storeToRefs(userProfileStore).profile;
@@ -547,6 +694,10 @@ const analyticsStore = useAnalyticsStore();
 const {
   profile,
   isSyncing,
+  profileMessage,
+  healthMessage,
+  therapistMessage,
+  therapists,
   loadSampleHealthData,
   saveHealthData,
   saveTherapistSettings,
@@ -568,7 +719,19 @@ const {
   downloadPDF,
   inviteCode,
   joinOrganization,
+  passwordForm,
+  isChangingPassword,
+  changePassword,
+  isManagingAccount,
+  accountPassword,
+  downloadAccountData,
+  logoutAllSessions,
+  deleteAccount,
+  leaveOrganization,
 } = useProfileActions();
+
+const { aiStatus, isAiStatusLoading, isAiConsentSaving, setConsent } = useAiConsent();
+const onConsentChange = (event: Event) => setConsent((event.target as HTMLInputElement).checked);
 
 // View-only: which tab of the profile is currently shown.
 const activeTab = ref<'profile' | 'health' | 'achievements' | 'history' | 'therapist'>('profile');
@@ -601,14 +764,22 @@ const initials = computed(() => {
 });
 
 const analyticsSummary = computed(() => {
-  if (analyticsStore.currentStreak > 0) {
-    return {
-      mood: 'Позитивное',
-      themes: ['Радость', 'Природа'],
-      recommendation: 'Продолжайте исследовать яркие цвета для поддержания настроения.',
-    };
-  }
-  return null;
+  const diaryCount = storeProfileRef.value.diaryEntries?.length || 0;
+  const imageCount = storeProfileRef.value.imageAnalysisHistory?.length || 0;
+  const courseCount = storeProfileRef.value.courseProgress?.length || 0;
+  if (diaryCount + imageCount + courseCount === 0) return null;
+  const sources = [];
+  if (diaryCount) sources.push(`${diaryCount} записей дневника`);
+  if (imageCount) sources.push(`${imageCount} анализов рисунков`);
+  if (courseCount) sources.push(`${courseCount} курсов`);
+  return {
+    activity: analyticsStore.currentStreak
+      ? `серия активности — ${analyticsStore.currentStreak} дней`
+      : 'первые данные уже сохранены',
+    sources,
+    nextStep:
+      'Продолжайте в удобном темпе — выводы появятся только на основе ваших реальных данных.',
+  };
 });
 
 const rootStyles = computed(() => {
@@ -645,6 +816,21 @@ const rootStyles = computed(() => {
 .user-profile-view {
   background-color: var(--mood-surface, var(--bg-color));
   transition: background-color 0.5s ease;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.danger-zone {
+  border-color: var(--danger-color);
+}
+
+.danger-action {
+  color: var(--danger-text);
+  border-color: var(--danger-color);
 }
 
 /* ---------- Profile hero ---------- */
@@ -784,6 +970,12 @@ const rootStyles = computed(() => {
 .tab-panel {
   animation: tab-fade-in 220ms ease;
 }
+
+.history-limit-notice {
+  color: var(--muted-text);
+  border-color: var(--primary-color);
+  background: var(--primary-soft);
+}
 @keyframes tab-fade-in {
   from {
     opacity: 0;
@@ -837,6 +1029,15 @@ const rootStyles = computed(() => {
   border: 1px solid var(--danger-color);
   border-radius: var(--radius-sm);
   padding: var(--space-3) var(--space-4);
+}
+
+.submission-feedback {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--text-color);
+  font-size: var(--text-sm);
 }
 .analysis-loading {
   gap: var(--space-2);

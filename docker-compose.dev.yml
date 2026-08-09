@@ -52,6 +52,8 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       AI_VISION_MODEL: ${AI_VISION_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
+      AI_DATA_PROCESSING_MODE: ${AI_DATA_PROCESSING_MODE:-local}
+      IMAGE_STORAGE_DIR: /app/data/images
     ports:
       - '${BACKEND_PORT:-3100}:3100'
     volumes:
@@ -59,6 +61,7 @@ services:
       # container's own node_modules from being shadowed by the host's.
       - ./backend/src:/app/backend/src
       - ./backend/prisma:/app/backend/prisma
+      - image_dev_data:/app/data/images
       - /app/node_modules
       - /app/backend/node_modules
     depends_on:
@@ -85,3 +88,4 @@ services:
 
 volumes:
   postgres_dev_data:
+  image_dev_data:

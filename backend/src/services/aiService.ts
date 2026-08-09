@@ -71,8 +71,8 @@ export class AIService {
       throw new Error('Failed to generate text from AI via OpenRouter');
     }
   }
-  static async extractTags(text: string): Promise<string[]> {
-    if (!AI_ENABLED) {
+  static async extractTags(text: string, allowProvider = true): Promise<string[]> {
+    if (!AI_ENABLED || !allowProvider) {
       // Lightweight keyword heuristic so diary/chat entries still get useful tags.
       const dict: Record<string, string> = {
         трев: 'Тревога',

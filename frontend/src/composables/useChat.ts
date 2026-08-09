@@ -23,6 +23,7 @@ interface ChatStreamData {
   content?: string;
   sessionId?: string;
   riskLevel?: string;
+  error?: string;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -99,43 +100,56 @@ export function useChat() {
         body: JSON.stringify({ message: userMessageText, sessionId: currentSessionId.value }),
       });
 
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.assign(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+          throw new Error('Session expired');
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 412 && payload.code === 'AI_CONSENT_REQUIRED') {
+          throw new Error('AI_CONSENT_REQUIRED');
+        }
+        throw new Error(payload.error || `Chat request failed with status ${response.status}`);
+      }
       if (!response.body) throw new Error('No body in response');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
+
+      const processEvent = (event: string) => {
+        for (const line of event.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const dataStr = line.slice(6);
+          if (dataStr === '[DONE]') continue;
+          try {
+            const data: ChatStreamData = JSON.parse(dataStr);
+            if (data.content) messages.value[aiMessageIndex].text += data.content;
+            if (data.sessionId) currentSessionId.value = data.sessionId;
+            if (data.riskLevel === 'high') showEmergency.value = true;
+            if (data.error) messages.value[aiMessageIndex].text = 'Не удалось получить ответ.';
+          } catch {
+            // A malformed provider event is ignored without discarding the rest.
+          }
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6);
-            if (dataStr === '[DONE]') continue;
-            try {
-              const data: ChatStreamData = JSON.parse(dataStr);
-              if (data.content) {
-                messages.value[aiMessageIndex].text += data.content;
-              }
-              if (data.sessionId) {
-                currentSessionId.value = data.sessionId;
-              }
-              if (data.riskLevel === 'high') {
-                showEmergency.value = true;
-              }
-            } catch {
-              // Ignore: SSE frames can arrive split across chunks, leaving a
-              // partial (not-yet-parseable) JSON fragment. The next chunk completes it.
-            }
-          }
-        }
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        events.forEach(processEvent);
       }
+      buffer += decoder.decode();
+      if (buffer.trim()) processEvent(buffer);
       await fetchSessions(); // Refresh sessions list
     } catch (error) {
       console.error('Error sending message:', error);
-      messages.value[aiMessageIndex].text = 'Ошибка связи с сервером.';
+      messages.value[aiMessageIndex].text =
+        error instanceof Error && error.message === 'AI_CONSENT_REQUIRED'
+          ? 'Для внешнего AI-провайдера нужно ваше согласие. Откройте «Профиль → Терапевт и данные».'
+          : 'Не удалось получить ответ. Проверьте соединение и попробуйте ещё раз.';
     } finally {
       isStreaming.value = false;
     }

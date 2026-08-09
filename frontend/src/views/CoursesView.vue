@@ -29,6 +29,12 @@
       </div>
     </div>
 
+    <div v-else-if="errorMessage" class="empty-state">
+      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+      <p>{{ errorMessage }}</p>
+      <button class="btn-outline" @click="coursesStore.fetchCourses()">Повторить</button>
+    </div>
+
     <div v-else-if="filteredCourses.length" class="grid grid-auto">
       <article
         v-for="course in filteredCourses"
@@ -49,12 +55,12 @@
           <h3 class="course-title">{{ course.title }}</h3>
           <p class="course-desc">{{ course.description }}</p>
 
-          <div v-if="progressOf(course.id) !== null" class="course-progress">
+          <div v-if="progressOf(course.slug) !== null" class="course-progress">
             <div class="progress">
-              <span :style="{ width: progressOf(course.id) + '%' }"></span>
+              <span :style="{ width: progressOf(course.slug) + '%' }"></span>
             </div>
             <span class="progress-label faint"
-              >{{ Math.round(progressOf(course.id)!) }}% пройдено</span
+              >{{ Math.round(progressOf(course.slug)!) }}% пройдено</span
             >
           </div>
 
@@ -62,7 +68,7 @@
             :to="{ name: 'CourseDetail', params: { courseId: course.slug } }"
             class="btn-primary course-cta"
           >
-            {{ progressOf(course.id) !== null ? 'Продолжить' : 'Начать курс' }}
+            {{ progressOf(course.slug) !== null ? 'Продолжить' : 'Начать курс' }}
             <Icon name="arrow-right" :size="18" />
           </RouterLink>
         </div>
@@ -98,7 +104,7 @@ const coversByCategory: Record<string, string> = {
 
 const coursesStore = useCoursesStore();
 const userProfileStore = useUserProfileStore();
-const { courses, isLoading } = storeToRefs(coursesStore);
+const { courses, isLoading, errorMessage } = storeToRefs(coursesStore);
 
 onMounted(() => coursesStore.fetchCourses());
 

@@ -81,10 +81,14 @@
                   <span class="chip badge-primary">{{ categoryLabel(course.category) }}</span>
                 </td>
                 <td>
-                  <button @click="openCourseModal(course)" class="btn-outline btn-sm">
-                    <Icon name="edit" :size="15" />
-                    Редактировать
-                  </button>
+                  <div class="row table-actions">
+                    <button @click="openCourseModal(course)" class="btn-outline btn-sm">
+                      <Icon name="edit" :size="15" /> Редактировать
+                    </button>
+                    <button @click="removeCourse(course)" class="btn-ghost btn-sm danger-action">
+                      <Icon name="trash" :size="15" /> Удалить
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -183,7 +187,13 @@
         <form @submit.prevent="saveCourse">
           <div class="form-group">
             <label>ID (латиницей)</label>
-            <input v-model="editingCourse.id" required :disabled="!!editingCourse._isEditing" />
+            <input
+              v-model="editingCourse.id"
+              required
+              pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+              placeholder="my-course"
+              :disabled="!!editingCourse._isEditing"
+            />
           </div>
           <div class="form-group">
             <label>Название</label>
@@ -191,7 +201,7 @@
           </div>
           <div class="form-group">
             <label>Описание</label>
-            <textarea v-model="editingCourse.description" rows="3"></textarea>
+            <textarea v-model="editingCourse.description" rows="3" required></textarea>
           </div>
           <div class="form-group">
             <label>Категория</label>
@@ -201,9 +211,90 @@
               <option value="child">Дети</option>
             </select>
           </div>
+          <section v-if="editingCourse._isEditing" class="content-builder">
+            <h4>Модули и уроки</h4>
+            <div
+              v-for="module in editingCourse.modules || []"
+              :key="module.id || module.title"
+              class="builder-block"
+            >
+              <div class="section-head compact-head">
+                <strong>{{ module.title }}</strong>
+                <button
+                  v-if="module.id"
+                  type="button"
+                  class="btn-ghost btn-sm danger-action"
+                  @click="removeModule(module.id)"
+                >
+                  Удалить модуль
+                </button>
+              </div>
+              <div
+                v-for="lesson in module.lessons"
+                :key="lesson.id || lesson.title"
+                class="builder-row"
+              >
+                <span>{{ lesson.title }}</span>
+                <button
+                  v-if="lesson.id"
+                  type="button"
+                  class="icon-btn"
+                  aria-label="Удалить урок"
+                  @click="removeLesson(lesson.id)"
+                >
+                  <Icon name="trash" :size="15" />
+                </button>
+              </div>
+              <div v-if="module.id" class="builder-add">
+                <input v-model="newLessonTitles[module.id]" placeholder="Название нового урока" />
+                <button type="button" class="btn-outline btn-sm" @click="addLesson(module.id)">
+                  Добавить урок
+                </button>
+              </div>
+            </div>
+            <div class="builder-add">
+              <input v-model="newModuleTitle" placeholder="Название нового модуля" />
+              <button type="button" class="btn-outline btn-sm" @click="addModule">
+                Добавить модуль
+              </button>
+            </div>
+
+            <h4>Домашние задания</h4>
+            <div
+              v-for="homework in editingCourse.relatedHomework || []"
+              :key="homework.id"
+              class="builder-row"
+            >
+              <span>{{ homework.title }}</span>
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label="Удалить задание"
+                @click="removeHomework(homework.id)"
+              >
+                <Icon name="trash" :size="15" />
+              </button>
+            </div>
+            <div class="builder-homework">
+              <input v-model="newHomework.title" placeholder="Название задания" />
+              <textarea
+                v-model="newHomework.description"
+                rows="2"
+                placeholder="Описание задания"
+              ></textarea>
+              <button type="button" class="btn-outline btn-sm" @click="addHomework">
+                Добавить задание
+              </button>
+            </div>
+          </section>
+          <p v-else class="muted builder-hint">
+            Сначала сохраните курс, затем добавьте модули, уроки и задания.
+          </p>
           <div class="modal-actions">
             <button type="button" @click="showCourseModal = false" class="btn-ghost">Отмена</button>
-            <button type="submit" class="btn-primary">Сохранить</button>
+            <button type="submit" class="btn-primary" :disabled="isSavingCourse">
+              {{ isSavingCourse ? 'Сохраняем…' : 'Сохранить' }}
+            </button>
           </div>
         </form>
       </div>
@@ -257,6 +348,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useCoursesStore, type Course, type CourseDraft } from '@/stores/coursesStore';
 import { storeToRefs } from 'pinia';
 import axios from 'axios';
+import { useToastStore } from '@/stores/toastStore';
 import Icon from '@/components/Icon.vue';
 
 interface Submission {
@@ -280,11 +372,16 @@ const emptySubmission = (): Submission => ({
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const coursesStore = useCoursesStore();
+const toastStore = useToastStore();
 const { courses } = storeToRefs(coursesStore);
 
 const activeTab = ref('courses');
 const showCourseModal = ref(false);
 const editingCourse = ref<CourseDraft>({ id: '' });
+const isSavingCourse = ref(false);
+const newModuleTitle = ref('');
+const newLessonTitles = ref<Record<string, string>>({});
+const newHomework = ref({ title: '', description: '' });
 
 const submissions = ref<Submission[]>([]);
 const submissionsLoading = ref(false);
@@ -328,10 +425,84 @@ const openCourseModal = (course?: Course) => {
 };
 
 const saveCourse = async () => {
+  isSavingCourse.value = true;
   const success = await coursesStore.saveCourse(editingCourse.value);
+  isSavingCourse.value = false;
   if (success) {
     showCourseModal.value = false;
+    toastStore.success('Курс сохранён.');
+  } else {
+    toastStore.error('Не удалось сохранить курс. Проверьте ID и заполненные поля.');
   }
+};
+
+const refreshEditingCourse = () => {
+  const refreshed = courses.value.find((course) => course.id === editingCourse.value.id);
+  if (refreshed) editingCourse.value = { ...refreshed, _isEditing: true };
+};
+
+const runContentAction = async (action: () => Promise<void>, success: string) => {
+  try {
+    await action();
+    refreshEditingCourse();
+    toastStore.success(success);
+  } catch (error) {
+    toastStore.error(
+      axios.isAxiosError(error)
+        ? error.response?.data?.error || 'Не удалось изменить содержимое курса.'
+        : 'Не удалось изменить содержимое курса.',
+    );
+  }
+};
+
+const addModule = async () => {
+  const title = newModuleTitle.value.trim();
+  if (!title) return;
+  await runContentAction(
+    () => coursesStore.addModule(editingCourse.value.id, title),
+    'Модуль добавлен.',
+  );
+  newModuleTitle.value = '';
+};
+
+const removeModule = (id: string) => {
+  if (!window.confirm('Удалить модуль вместе с его уроками?')) return;
+  runContentAction(() => coursesStore.deleteModule(id), 'Модуль удалён.');
+};
+
+const addLesson = async (moduleId: string) => {
+  const title = newLessonTitles.value[moduleId]?.trim();
+  if (!title) return;
+  await runContentAction(() => coursesStore.addLesson(moduleId, title), 'Урок добавлен.');
+  newLessonTitles.value[moduleId] = '';
+};
+
+const removeLesson = (id: string) => {
+  if (!window.confirm('Удалить урок?')) return;
+  runContentAction(() => coursesStore.deleteLesson(id), 'Урок удалён.');
+};
+
+const addHomework = async () => {
+  const title = newHomework.value.title.trim();
+  const description = newHomework.value.description.trim();
+  if (!title || !description) return;
+  await runContentAction(
+    () => coursesStore.addHomework(editingCourse.value.id, title, description),
+    'Задание добавлено.',
+  );
+  newHomework.value = { title: '', description: '' };
+};
+
+const removeHomework = (id: string) => {
+  if (!window.confirm('Удалить домашнее задание?')) return;
+  runContentAction(() => coursesStore.deleteHomework(id), 'Задание удалено.');
+};
+
+const removeCourse = async (course: Course) => {
+  if (!window.confirm(`Удалить курс «${course.title}»?`)) return;
+  const result = await coursesStore.deleteCourse(course.id);
+  if (result.ok) toastStore.success('Курс удалён.');
+  else toastStore.error(result.error);
 };
 
 const openGradeModal = (sub: Submission) => {
@@ -352,13 +523,47 @@ const submitGrade = async () => {
     });
     showGradeModal.value = false;
     fetchSubmissions();
+    toastStore.success('Оценка и обратная связь сохранены.');
   } catch {
-    alert('Ошибка при сохранении оценки');
+    toastStore.error('Не удалось сохранить оценку. Попробуйте ещё раз.');
   }
 };
 </script>
 
 <style scoped>
+.content-builder {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-color);
+}
+.builder-block {
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.compact-head {
+  margin-bottom: var(--space-2);
+}
+.builder-row,
+.builder-add {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.builder-add input {
+  flex: 1;
+}
+.builder-homework {
+  display: grid;
+  gap: var(--space-2);
+}
+.builder-hint {
+  margin-top: var(--space-3);
+}
 .page-head {
   margin-bottom: var(--space-5);
 }

@@ -68,12 +68,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useAuthStore } from '../stores/authStore';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import Icon from '@/components/Icon.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
 
 const authStore = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const email = ref('');
 const password = ref('');
@@ -85,7 +86,8 @@ async function handleLogin() {
   error.value = '';
   const success = await authStore.login(email.value, password.value);
   if (success) {
-    router.push('/');
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
+    router.replace(redirect);
   } else {
     error.value = 'Не удалось войти. Проверьте email и пароль.';
   }

@@ -7,6 +7,7 @@ import { rewardPoints } from '../middleware/gamification';
 import { AnalyticsService } from '../services/analyticsService';
 import { validateImageInput, validateTextInput } from '../security/inputValidation';
 import { createLogger } from '../config/logger';
+import { readStoredImage, removeStoredImage, storeImage } from '../services/imageStorageService';
 
 const log = createLogger('aiController');
 
@@ -105,10 +106,10 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
 
       const dbMessages = await prisma.chatMessage.findMany({
         where: { sessionId: activeSessionId },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
         take: 10, // Last 10 messages for context
       });
-      history = dbMessages.map((m) => ({
+      history = dbMessages.reverse().map((m) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
         content: m.content,
       }));
@@ -149,57 +150,74 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     let fullReply = '';
     const reader = stream.getReader();
     const decoder = new TextDecoder();
+    let upstreamBuffer = '';
+
+    const forwardEvent = (event: string) => {
+      for (const line of event.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const dataStr = line.slice(6);
+        if (dataStr === '[DONE]') {
+          res.write('data: [DONE]\n\n');
+          continue;
+        }
+        try {
+          const data = JSON.parse(dataStr);
+          const content = data.choices?.[0]?.delta?.content || '';
+          fullReply += content;
+          if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        } catch {
+          // Ignore malformed complete events from an upstream provider.
+        }
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-            break;
-          }
-          try {
-            const data = JSON.parse(dataStr);
-            const content = data.choices[0]?.delta?.content || '';
-            fullReply += content;
-            res.write(`data: ${JSON.stringify({ content })}\n\n`);
-          } catch {
-            // Partial JSON or other error
-          }
-        }
-      }
+      upstreamBuffer += decoder.decode(value, { stream: true });
+      const events = upstreamBuffer.split('\n\n');
+      upstreamBuffer = events.pop() || '';
+      events.forEach(forwardEvent);
     }
+    upstreamBuffer += decoder.decode();
+    if (upstreamBuffer.trim()) forwardEvent(upstreamBuffer);
 
     // After stream ends, save assistant reply to DB
     if (fullReply) {
       await prisma.chatMessage.create({
         data: { sessionId: activeSessionId, role: 'assistant', content: fullReply },
       });
+      await rewardPoints(req.user.id, 5, 'Chat engagement');
     }
 
     res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
     res.end();
   } catch (error: unknown) {
     log.error({ err: error instanceof Error ? error.message : String(error) }, 'Chat stream error');
+    if (!res.headersSent) {
+      return res.status(502).json({ error: 'Не удалось получить ответ ассистента' });
+    }
     res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`);
-    res.end();
+    return res.end();
   }
 };
 
 export const getSessions = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   try {
+    const requestedLimit = Number(req.query.limit || 50);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(100, Math.max(1, requestedLimit))
+      : 50;
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
     const sessions = await prisma.chatSession.findMany({
       where: { userId: req.user.id },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-    res.json(sessions);
+    if (sessions.length > limit) res.setHeader('X-Next-Cursor', sessions[limit - 1].id);
+    res.json(sessions.slice(0, limit));
   } catch {
     res.status(500).json({ error: 'Failed to fetch sessions' });
   }
@@ -228,7 +246,8 @@ export const getChatHistory = async (req: AuthRequest, res: Response) => {
 export const analyzeImage = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
-  const { promptText, mimeType, base64Image } = req.body;
+  const { promptText, mimeType, base64Image, analysisId, originalImageName, extendedQuestions } =
+    req.body;
   const promptValidation = validateTextInput(promptText, 2_000);
   if (!promptValidation.ok) return res.status(400).json({ error: promptValidation.error });
   const imageValidation = validateImageInput(mimeType, base64Image, 5 * 1024 * 1024);
@@ -242,26 +261,81 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
       base64Image,
     );
 
-    await prisma.imageAnalysis.create({
-      data: {
-        userId: req.user.id,
-        prompt: safePrompt,
-        result: reply,
-        tokensPrompt: usage?.prompt_tokens || 0,
-        tokensCompletion: usage?.completion_tokens || 0,
-        cost: 0, // Could calculate based on model rates
-      },
-    });
+    let analysis;
+    if (typeof analysisId === 'string' && analysisId) {
+      const owned = await prisma.imageAnalysis.findFirst({
+        where: { id: analysisId, userId: req.user.id },
+        select: { id: true },
+      });
+      if (!owned) return res.status(404).json({ error: 'Image analysis not found' });
+      analysis = await prisma.imageAnalysis.update({
+        where: { id: analysisId },
+        data: {
+          extendedAnalysisText: reply,
+          ...(Array.isArray(extendedQuestions) ? { extendedQuestions } : {}),
+          tokensPrompt: { increment: usage?.prompt_tokens || 0 },
+          tokensCompletion: { increment: usage?.completion_tokens || 0 },
+        },
+      });
+    } else {
+      const imageStorageKey = await storeImage(base64Image, mimeType);
+      try {
+        analysis = await prisma.imageAnalysis.create({
+          data: {
+            userId: req.user.id,
+            prompt: safePrompt,
+            result: reply,
+            imageUrl: null,
+            imageStorageKey,
+            imageMimeType: mimeType,
+            originalImageName:
+              typeof originalImageName === 'string' ? originalImageName.slice(0, 255) : null,
+            tokensPrompt: usage?.prompt_tokens || 0,
+            tokensCompletion: usage?.completion_tokens || 0,
+            cost: 0,
+          },
+        });
+      } catch (error) {
+        await removeStoredImage(imageStorageKey);
+        throw error;
+      }
+    }
 
     // Award 15 points for image analysis
-    await rewardPoints(req.user.id, 15, 'Image analysis');
+    if (!analysisId) await rewardPoints(req.user.id, 15, 'Image analysis');
 
-    res.json({ reply });
+    res.json({ reply, analysisId: analysis.id, timestamp: analysis.date });
   } catch (error: unknown) {
     log.error(
       { err: error instanceof Error ? error.message : String(error) },
       'Image analysis controller error',
     );
     res.status(500).json({ error: 'Error processing your image analysis request' });
+  }
+};
+
+export const getStoredImage = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const id = req.params.id as string;
+  try {
+    const image = await prisma.imageAnalysis.findFirst({
+      where: { id, OR: [{ userId: req.user.id }, { isPublic: true }] },
+      select: { imageStorageKey: true, imageMimeType: true, imageUrl: true },
+    });
+    if (!image) return res.status(404).json({ error: 'Image not found' });
+    res.setHeader('Cache-Control', image.imageStorageKey ? 'private, max-age=3600' : 'no-store');
+    if (image.imageStorageKey) {
+      res.type(image.imageMimeType || 'application/octet-stream');
+      return res.send(await readStoredImage(image.imageStorageKey));
+    }
+    if (image.imageUrl?.startsWith('data:')) {
+      const match = image.imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return res.status(404).json({ error: 'Image data not found' });
+      res.type(match[1]);
+      return res.send(Buffer.from(match[2], 'base64'));
+    }
+    return res.status(404).json({ error: 'Image data not found' });
+  } catch {
+    return res.status(500).json({ error: 'Error reading image' });
   }
 };

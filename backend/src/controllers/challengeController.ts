@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { challengeActionSchema } from '../schemas';
+import { checkAchievements } from '../middleware/gamification';
 
 export const getChallenges = async (req: AuthRequest, res: Response) => {
   try {
@@ -18,6 +20,7 @@ export const getChallenges = async (req: AuthRequest, res: Response) => {
       challenges.map((c) => ({
         ...c,
         joined: userJoined.some((uj) => uj.challengeId === c.id),
+        completed: userJoined.some((uj) => uj.challengeId === c.id && uj.completed),
       })),
     );
   } catch {
@@ -27,7 +30,9 @@ export const getChallenges = async (req: AuthRequest, res: Response) => {
 
 export const joinChallenge = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { challengeId } = req.body;
+  const validation = challengeActionSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid challenge id' });
+  const { challengeId } = validation.data;
 
   try {
     const uc = await prisma.userChallenge.upsert({
@@ -43,7 +48,9 @@ export const joinChallenge = async (req: AuthRequest, res: Response) => {
 
 export const completeChallenge = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { challengeId } = req.body;
+  const validation = challengeActionSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid challenge id' });
+  const { challengeId } = validation.data;
 
   try {
     const challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
@@ -51,19 +58,25 @@ export const completeChallenge = async (req: AuthRequest, res: Response) => {
 
     // Award points only on the first completion. Guarding the update on
     // `completed: false` makes this idempotent — repeat calls can't farm points.
-    const { count } = await prisma.userChallenge.updateMany({
-      where: { userId: req.user.id, challengeId, completed: false },
-      data: { completed: true },
+    const count = await prisma.$transaction(async (tx) => {
+      const updated = await tx.userChallenge.updateMany({
+        where: { userId: req.user!.id, challengeId, completed: false },
+        data: { completed: true },
+      });
+      if (updated.count > 0) {
+        await tx.user.update({
+          where: { id: req.user!.id },
+          data: { points: { increment: challenge.pointsAward } },
+        });
+      }
+      return updated.count;
     });
 
     if (count === 0) {
       return res.status(409).json({ error: 'Challenge already completed or not joined' });
     }
 
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { points: { increment: challenge.pointsAward } },
-    });
+    await checkAchievements(req.user.id);
 
     res.json({ message: 'Challenge completed!', pointsAwarded: challenge.pointsAward });
   } catch {

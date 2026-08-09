@@ -40,15 +40,23 @@ services:
       # Structured JSON, one object per line — what log shippers expect.
       LOG_FORMAT: ${LOG_FORMAT:-json}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Local Docker is served over HTTP. Set true behind an HTTPS reverse proxy.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       # Optional AI provider (OpenAI-compatible, local or hosted). Leave unset to
       # run with graceful canned fallbacks.
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_MODEL: ${AI_MODEL:-}
       AI_VISION_MODEL: ${AI_VISION_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
+      # Use "local" only for an on-premise endpoint. External mode enables the
+      # explicit, revocable consent gate in the user profile.
+      AI_DATA_PROCESSING_MODE: ${AI_DATA_PROCESSING_MODE:-external}
+      IMAGE_STORAGE_DIR: /app/data/images
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - image_data:/app/data/images
     logging: &default_logging
       driver: json-file
       options:
@@ -68,3 +76,4 @@ services:
 
 volumes:
   postgres_data:
+  image_data:

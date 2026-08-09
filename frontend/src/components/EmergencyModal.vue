@@ -22,7 +22,7 @@
             <span class="contact-icon"><Icon name="phone" :size="18" /></span>
             <div class="contact-text">
               <strong>Экстренная помощь</strong>
-              <span class="contact-number">112</span>
+              <a class="contact-number" href="tel:112">112</a>
               <span class="contact-note">если существует непосредственная опасность</span>
             </div>
           </div>
@@ -42,8 +42,8 @@
           Арт-практики могут быть поддержкой, но не заменяют экстренную или профессиональную помощь.
         </p>
 
-        <button @click="$emit('close')" class="close-btn btn-primary btn-block">
-          Я справлюсь, спасибо
+        <button ref="closeButton" @click="close" class="close-btn btn-primary btn-block">
+          Закрыть окно
         </button>
       </div>
     </div>
@@ -51,10 +51,35 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import Icon from '@/components/Icon.vue';
 
-defineProps<{ show: boolean }>();
-defineEmits(['close']);
+const props = defineProps<{ show: boolean }>();
+const emit = defineEmits(['close']);
+const closeButton = ref<HTMLButtonElement | null>(null);
+let previousFocus: HTMLElement | null = null;
+
+const close = () => emit('close');
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && props.show) close();
+};
+
+watch(
+  () => props.show,
+  async (show) => {
+    if (show) {
+      previousFocus = document.activeElement as HTMLElement | null;
+      document.addEventListener('keydown', onKeydown);
+      await nextTick();
+      closeButton.value?.focus();
+    } else {
+      document.removeEventListener('keydown', onKeydown);
+      previousFocus?.focus();
+    }
+  },
+);
+
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
 </script>
 
 <style scoped>

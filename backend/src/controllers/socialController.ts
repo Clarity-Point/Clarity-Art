@@ -1,12 +1,12 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { galleryVisibilitySchema, healthMetricSchema } from '../schemas';
 
 export const getPublicGallery = async (req: AuthRequest, res: Response) => {
   try {
     const images = await prisma.imageAnalysis.findMany({
       where: { isPublic: true },
-      include: { user: { select: { profile: { select: { name: true } } } } },
       orderBy: { date: 'desc' },
       take: 20,
     });
@@ -16,9 +16,10 @@ export const getPublicGallery = async (req: AuthRequest, res: Response) => {
         id: img.id,
         prompt: img.prompt,
         result: img.result,
+        imageUrl: img.imageStorageKey ? `/api/images/${img.id}` : img.imageUrl,
         date: img.date,
         likes: img.likes,
-        userName: img.user.profile?.name || 'Anonymous',
+        userName: img.userId === req.user?.id ? 'Вы' : 'Участник',
       })),
     );
   } catch {
@@ -28,7 +29,9 @@ export const getPublicGallery = async (req: AuthRequest, res: Response) => {
 
 export const togglePublic = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { id, isPublic } = req.body;
+  const validation = galleryVisibilitySchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid gallery request' });
+  const { id, isPublic } = validation.data;
 
   try {
     // Scope to the owner: a mismatch changes zero rows rather than erroring.
@@ -44,22 +47,37 @@ export const togglePublic = async (req: AuthRequest, res: Response) => {
 };
 
 export const likePost = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   const id = req.params.id as string;
   try {
-    // Only publicly shared images can be liked — a private image must never have
-    // its existence revealed via its like counter.
-    const { count } = await prisma.imageAnalysis.updateMany({
+    const image = await prisma.imageAnalysis.findFirst({
       where: { id, isPublic: true },
-      data: { likes: { increment: 1 } },
+      select: { id: true, likes: true },
     });
-    if (count === 0) return res.status(404).json({ error: 'Image not found' });
+    if (!image) return res.status(404).json({ error: 'Image not found' });
 
-    const image = await prisma.imageAnalysis.findUnique({
-      where: { id },
-      select: { likes: true },
-    });
-    res.json({ likes: image?.likes ?? 0 });
-  } catch {
+    try {
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.imageLike.create({ data: { imageId: id, userId: req.user!.id } });
+        return tx.imageAnalysis.update({
+          where: { id },
+          data: { likes: { increment: 1 } },
+          select: { likes: true },
+        });
+      });
+      return res.json({ likes: updated.likes, liked: true });
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error && 'code' in error && error.code === 'P2002') {
+        const current = await prisma.imageAnalysis.findUnique({
+          where: { id },
+          select: { likes: true },
+        });
+        return res.json({ likes: current?.likes ?? image.likes, liked: true });
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error liking post:', error);
     res.status(500).json({ error: 'Error liking post' });
   }
 };
@@ -67,7 +85,9 @@ export const likePost = async (req: AuthRequest, res: Response) => {
 export const createHealthMetric = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   // Accept both the legacy and the current field names.
-  const { heartRate, heartRateAvg, sleepHours, stepsCount } = req.body;
+  const validation = healthMetricSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid health metrics' });
+  const { heartRate, heartRateAvg, sleepHours, stepsCount } = validation.data;
   try {
     await prisma.profile.update({
       where: { userId: req.user.id },

@@ -5,7 +5,17 @@
       <p class="page-subtitle">Совместное творчество помогает двигаться вперёд быстрее.</p>
     </header>
 
-    <div v-if="challenges.length" class="grid grid-auto">
+    <div v-if="isLoading" class="grid grid-auto">
+      <div v-for="n in 4" :key="n" class="card skeleton" style="height: 250px"></div>
+    </div>
+
+    <div v-else-if="errorMessage" class="empty-state">
+      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+      <p>{{ errorMessage }}</p>
+      <button class="btn-outline" @click="fetchChallenges">Повторить</button>
+    </div>
+
+    <div v-else-if="challenges.length" class="grid grid-auto">
       <article
         v-for="challenge in challenges"
         :key="challenge.id"
@@ -44,9 +54,16 @@
           <Icon name="user-plus" :size="16" />
           Участвовать
         </button>
+        <button
+          v-else-if="!challenge.completed"
+          class="btn-outline btn-block join-btn"
+          @click="complete(challenge.id)"
+        >
+          <Icon name="check-circle" :size="16" /> Завершить челлендж
+        </button>
         <span v-else class="status-msg">
           <Icon name="check-circle" :size="16" />
-          Вы участвуете!
+          Челлендж завершён
         </span>
       </article>
     </div>
@@ -73,16 +90,33 @@ interface Challenge {
   endDate: string;
   pointsAward: number;
   joined: boolean;
+  completed: boolean;
 }
 
 const challenges = ref<Challenge[]>([]);
+const isLoading = ref(true);
+const errorMessage = ref('');
 
 const fetchChallenges = async () => {
   try {
+    errorMessage.value = '';
     const response = await axios.get(`${API_URL}/challenges`);
     challenges.value = response.data;
   } catch (error) {
     console.error('Failed to fetch challenges:', error);
+    errorMessage.value = 'Не удалось загрузить челленджи. Проверьте соединение и повторите.';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const complete = async (id: string) => {
+  try {
+    await axios.post(`${API_URL}/challenges/complete`, { challengeId: id });
+    await fetchChallenges();
+  } catch (error) {
+    console.error('Failed to complete challenge:', error);
+    errorMessage.value = 'Не удалось завершить челлендж. Попробуйте ещё раз.';
   }
 };
 

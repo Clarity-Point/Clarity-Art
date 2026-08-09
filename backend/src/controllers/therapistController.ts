@@ -5,6 +5,20 @@ import { createLogger } from '../config/logger';
 
 const log = createLogger('therapistController');
 
+export const getAvailableTherapists = async (_req: AuthRequest, res: Response) => {
+  const therapists = await prisma.user.findMany({
+    where: { role: 'THERAPIST' },
+    select: { id: true, profile: { select: { name: true } } },
+    orderBy: { profile: { name: 'asc' } },
+  });
+  res.json(
+    therapists.map((therapist) => ({
+      id: therapist.id,
+      name: therapist.profile?.name || 'Терапевт',
+    })),
+  );
+};
+
 export const getPatients = async (req: AuthRequest, res: Response) => {
   // Role is enforced by the `isTherapist` middleware (fresh DB role check); the
   // query below further scopes results to this therapist's consenting patients.

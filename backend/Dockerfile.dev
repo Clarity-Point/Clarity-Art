@@ -8,7 +8,7 @@ FROM node:${NODE_VERSION}
 
 WORKDIR /app
 
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init ttf-dejavu
 
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/

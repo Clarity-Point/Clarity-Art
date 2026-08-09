@@ -23,6 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!user.value);
   const isAdmin = computed(() => user.value?.role === 'ADMIN');
   const profileStore = useUserProfileStore();
+  let restorePromise: Promise<boolean> | null = null;
 
   function applyProfile(profile: Record<string, unknown>) {
     user.value = {
@@ -34,15 +35,17 @@ export const useAuthStore = defineStore('auth', () => {
         typeof profile.organizationId === 'string' ? profile.organizationId : undefined,
     };
     profileStore.hydrateProfile(profile);
-    if (typeof profile.streak === 'number') useAnalyticsStore().hydrateStreak(profile.streak);
+    if (typeof profile.streak === 'number' && typeof profile.id === 'string') {
+      useAnalyticsStore().hydrateStreak(profile.streak, profile.id);
+    }
   }
 
   async function login(email: string, password: string) {
     try {
-      const response = await axios.post(`${API_URL}/login`, { email, password });
-      user.value = response.data.user;
-      if (response.data.user?.profile) profileStore.hydrateProfile(response.data.user.profile);
-      return true;
+      await axios.post(`${API_URL}/login`, { email, password });
+      // GET /profile is the canonical, complete shape. Hydrating from the small
+      // login response left history, points and progress empty until a reload.
+      return await restoreSession();
     } catch (error) {
       console.error('Login failed:', error);
       return false;
@@ -66,23 +69,48 @@ export const useAuthStore = defineStore('auth', () => {
       console.error('Logout request failed:', error);
     } finally {
       user.value = null;
+      profileStore.resetProfile();
+      useAnalyticsStore().clearUserAnalytics();
     }
   }
 
   async function restoreSession() {
-    try {
-      const response = await axios.get(`${API_URL}/profile`);
-      applyProfile(response.data);
-      return true;
-    } catch {
-      user.value = null;
-      return false;
-    }
+    if (restorePromise) return restorePromise;
+    restorePromise = (async () => {
+      try {
+        const response = await axios.get(`${API_URL}/profile`);
+        applyProfile(response.data);
+        return true;
+      } catch {
+        user.value = null;
+        profileStore.resetProfile();
+        return false;
+      } finally {
+        restorePromise = null;
+      }
+    })();
+    return restorePromise;
   }
 
   async function fetchProfile() {
     await restoreSession();
   }
 
-  return { user, isAuthenticated, isAdmin, login, register, logout, restoreSession, fetchProfile };
+  function expireSession() {
+    user.value = null;
+    profileStore.resetProfile();
+    useAnalyticsStore().clearUserAnalytics();
+  }
+
+  return {
+    user,
+    isAuthenticated,
+    isAdmin,
+    login,
+    register,
+    logout,
+    restoreSession,
+    fetchProfile,
+    expireSession,
+  };
 });

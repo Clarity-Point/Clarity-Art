@@ -12,7 +12,7 @@
   <div v-else-if="!course" class="page page-narrow">
     <div class="empty-state">
       <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
-      <p>Этот курс не найден. Возможно, он был перемещён или удалён.</p>
+      <p>{{ errorMessage || 'Этот курс не найден. Возможно, он был перемещён или удалён.' }}</p>
       <RouterLink to="/courses" class="btn-outline" style="margin-top: var(--space-4)">
         <Icon name="arrow-left" :size="16" /> К списку курсов
       </RouterLink>
@@ -129,6 +129,7 @@
           <p class="muted progress-hint">
             {{ progressHint }}
           </p>
+          <p v-if="progressError" class="course-error" role="alert">{{ progressError }}</p>
         </section>
       </aside>
     </div>
@@ -136,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import { useCoursesStore } from '@/stores/coursesStore';
 import { useUserProfileStore } from '@/stores/userProfileStore';
@@ -159,10 +160,11 @@ const route = useRoute();
 const coursesStore = useCoursesStore();
 const userProfileStore = useUserProfileStore();
 
-const { currentCourse: course, isLoading } = storeToRefs(coursesStore);
+const { currentCourse: course, isLoading, errorMessage } = storeToRefs(coursesStore);
 const { profile } = storeToRefs(userProfileStore);
 
 const courseId = computed(() => route.params.courseId as string);
+const progressError = ref('');
 
 onMounted(async () => {
   if (courseId.value) {
@@ -176,7 +178,7 @@ const isLessonCompleted = (lessonTitle: string) => {
   return progress?.completedLessons?.includes(lessonTitle) || false;
 };
 
-const toggleLesson = (lessonTitle: string) => {
+const toggleLesson = async (lessonTitle: string) => {
   if (!course.value) return;
 
   const progressEntry = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
@@ -189,11 +191,11 @@ const toggleLesson = (lessonTitle: string) => {
     completedLessons.push(lessonTitle);
   }
 
-  updateProgress(completedLessons);
+  await updateProgress(completedLessons);
 };
 
-const updateProgress = (completedLessons: string[]) => {
-  if (!course.value) return;
+const updateProgress = async (completedLessons: string[]) => {
+  if (!course.value) return false;
 
   const totalLessons = course.value.modules.reduce((acc, mod) => acc + mod.lessons.length, 0);
   const totalHomeworks = course.value.relatedHomework?.length || 0;
@@ -208,7 +210,8 @@ const updateProgress = (completedLessons: string[]) => {
 
   const newProgress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
 
-  userProfileStore.updateCourseProgress({
+  progressError.value = '';
+  const saved = await userProfileStore.updateCourseProgress({
     courseId: course.value?.id,
     courseName: course.value.title,
     progress: newProgress,
@@ -216,6 +219,8 @@ const updateProgress = (completedLessons: string[]) => {
     lastAccessed: new Date().toISOString(),
     completedDate: newProgress === 100 ? new Date().toISOString() : undefined,
   });
+  if (!saved) progressError.value = 'Не удалось сохранить прогресс. Попробуйте ещё раз.';
+  return saved;
 };
 
 const currentCourseProgress = computed(() => {
@@ -269,6 +274,10 @@ watch(
 <style scoped>
 .course-detail-view {
   padding-bottom: var(--space-8);
+}
+.course-error {
+  color: var(--danger-text);
+  font-size: var(--text-sm);
 }
 
 /* Hero */

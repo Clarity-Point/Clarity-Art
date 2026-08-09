@@ -23,11 +23,19 @@ export const AI_VISION_MODEL = process.env.AI_VISION_MODEL || AI_MODEL;
 
 export const AI_API_KEY = (process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY || '').trim();
 
+export const AI_DATA_PROCESSING_MODE =
+  process.env.AI_DATA_PROCESSING_MODE === 'local' ? 'local' : 'external';
+
 // AI is "enabled" when there is somewhere to send requests: either a key is set
 // (hosted providers) or a custom base URL is configured (a local server that
 // needs no key). Otherwise the app runs in a graceful, canned-fallback mode so
 // it stays fully usable offline with zero configuration.
 export const AI_ENABLED = !!(AI_API_KEY || process.env.AI_BASE_URL);
+
+// External providers may receive diary, chat, profile and image content only
+// after the user has explicitly opted in. Local/offline inference needs no such
+// transfer consent because data stays inside the deployment.
+export const AI_REQUIRES_CONSENT = AI_ENABLED && AI_DATA_PROCESSING_MODE === 'external';
 
 /**
  * Headers for an OpenAI-compatible request. The Authorization header is only

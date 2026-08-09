@@ -80,38 +80,22 @@ const audioPlayerRef = ref<HTMLAudioElement | null>(null);
 const currentTrackUrl = ref<string | null>(null);
 const currentTrackTitle = ref<string | null>(null);
 
-// Demonstration audio assets served from external CDNs. For a fully offline /
-// self-hosted deployment, drop your own royalty-free files into
-// frontend/public/audio/ and point these URLs at them (e.g. '/audio/rain.mp3').
+// Locally generated ambient loops keep the self-hosted/offline promise and do
+// not disclose listening activity to third-party media CDNs.
 const natureSounds = ref<Track[]>([
   {
     name: 'Шум дождя',
-    url: 'https://www.soundjay.com/nature/sounds/rain-07.mp3',
+    url: '/audio/rain.ogg',
     category: 'Звуки природы',
   },
   {
     name: 'Лесные звуки',
-    url: 'https://www.soundjay.com/nature/sounds/forest-ambience-1.mp3',
+    url: '/audio/forest.ogg',
     category: 'Звуки природы',
   },
   {
     name: 'Океанские волны',
-    url: 'https://www.soundjay.com/nature/sounds/ocean-waves-crashing-01.mp3',
-    category: 'Звуки природы',
-  },
-  {
-    name: 'Треск костра',
-    url: 'https://www.soundjay.com/nature/sounds/campfire-1.mp3',
-    category: 'Звуки природы',
-  },
-  {
-    name: 'Пение птиц',
-    url: 'https://www.soundjay.com/nature/sounds/birds-singing-01.mp3',
-    category: 'Звуки природы',
-  },
-  {
-    name: 'Поток воды',
-    url: 'https://www.soundjay.com/nature/sounds/water-flowing-01.mp3',
+    url: '/audio/ocean.ogg',
     category: 'Звуки природы',
   },
 ]);
@@ -119,17 +103,7 @@ const natureSounds = ref<Track[]>([
 const musicStyles = ref<Track[]>([
   {
     name: 'Lo-fi для релакса',
-    url: 'https://www.chosic.com/wp-content/uploads/2021/07/The-Way-Home.mp3',
-    category: 'Музыкальные стили',
-  },
-  {
-    name: 'Эмбиент для концентрации',
-    url: 'https://www.chosic.com/wp-content/uploads/2022/01/Floating-Abstract.mp3',
-    category: 'Музыкальные стили',
-  },
-  {
-    name: 'Классика для вдохновения',
-    url: 'https://www.chosic.com/wp-content/uploads/2020/05/Puccini-Turandot-Nessun-Dorma-Instrumental.mp3',
+    url: '/audio/ambient.ogg',
     category: 'Музыкальные стили',
   },
 ]);

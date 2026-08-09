@@ -59,9 +59,20 @@ jobs:
         run: npx vue-tsc --noEmit -p tsconfig.app.json
         working-directory: ./frontend
 
+      - name: Frontend tests
+        run: npm test
+        working-directory: ./frontend
+
       - name: Frontend build
         run: npm run build
         working-directory: ./frontend
+
+      - name: Verify installable PWA assets
+        run: |
+          test -s frontend/dist/manifest.webmanifest
+          test -s frontend/dist/sw.js
+          test -s frontend/dist/pwa-192x192.png
+          test -s frontend/dist/pwa-512x512.png
 
       # Fails on every high/critical advisory except those with a written
       # justification in .audit-allowlist.json.

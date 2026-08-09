@@ -5,6 +5,13 @@
 server {
     listen 80;
     server_name localhost;
+    server_tokens off;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'" always;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -42,7 +49,7 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?)$ {
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ogg)$ {
         expires 30d;
         add_header Cache-Control "public, immutable";
         try_files $uri =404;

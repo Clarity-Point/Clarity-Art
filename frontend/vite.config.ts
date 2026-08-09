@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => {
           name: 'Точка Ясности: рефлексивные арт-практики',
           short_name: 'Точка Ясности',
           description: 'Self-hosted платформа рефлексивных арт-практик и самоподдержки',
+          lang: 'ru',
+          background_color: '#ffffff',
           theme_color: '#ffffff',
           icons: [
             {
@@ -37,7 +39,8 @@ export default defineConfig(({ mode }) => {
         // Cache only build assets. Authenticated API responses can contain diary,
         // chat, health and profile data and must never be persisted by Workbox.
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg,ogg}'],
+          navigateFallback: '/index.html',
         },
       }),
     ],

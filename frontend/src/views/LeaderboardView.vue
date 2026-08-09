@@ -15,6 +15,7 @@
     <div v-else-if="error" class="empty-state">
       <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
       <p>{{ error }}</p>
+      <button class="btn-outline" @click="fetchLeaderboard">Повторить</button>
     </div>
 
     <div v-else-if="leaderboard.length" class="card leaderboard-card">
@@ -22,7 +23,7 @@
         v-for="user in leaderboard"
         :key="user.id"
         class="leader-row row-between"
-        :class="{ 'is-me': isMe(user.id), 'is-top': user.rank <= 3 }"
+        :class="{ 'is-me': user.isCurrentUser, 'is-top': user.rank <= 3 }"
       >
         <div class="row leader-main">
           <span class="rank-badge" :class="`rank-${user.rank <= 3 ? user.rank : 'other'}`">
@@ -33,7 +34,7 @@
           <div class="leader-name-wrap">
             <div class="leader-name">
               {{ user.name }}
-              <span v-if="isMe(user.id)" class="chip badge-primary you-chip">Вы</span>
+              <span v-if="user.isCurrentUser" class="chip badge-primary you-chip">Вы</span>
             </div>
             <div class="leader-sub faint row">
               <span class="chip level-chip">Ур. {{ user.level }}</span>
@@ -89,14 +90,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
-import { useUserProfileStore } from '@/stores/userProfileStore';
-import { useAuthStore } from '@/stores/authStore';
 import Icon from '@/components/Icon.vue';
 
 interface LeaderboardUser {
   rank: number;
   id: string;
   name: string;
+  isCurrentUser: boolean;
   points: number;
   streak: number;
   level: number;
@@ -105,16 +105,11 @@ interface LeaderboardUser {
 const leaderboard = ref<LeaderboardUser[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
-const userProfileStore = useUserProfileStore();
-const authStore = useAuthStore();
-
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-const isMe = (userId: string) => {
-  return !!authStore.user?.id && authStore.user.id === userId;
-};
-
-onMounted(async () => {
+const fetchLeaderboard = async () => {
+  loading.value = true;
+  error.value = null;
   try {
     const response = await axios.get(`${API_URL}/leaderboard`);
     leaderboard.value = response.data;
@@ -123,7 +118,9 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
-});
+};
+
+onMounted(fetchLeaderboard);
 
 // View-only helper (display formatting only)
 const initialsOf = (name: string) => {
@@ -135,8 +132,6 @@ const initialsOf = (name: string) => {
     .map((p) => p[0]?.toUpperCase())
     .join('');
 };
-
-void userProfileStore;
 </script>
 
 <style scoped>

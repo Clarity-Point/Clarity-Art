@@ -82,6 +82,7 @@ export interface UserProfile {
   stepsCount: number;
   heartRateAvg: number;
   isSharedWithTherapist: boolean;
+  aiDataConsentAt?: string | null;
   therapistId?: string;
   imageAnalysisHistory: ImageAnalysisEntry[];
   courseProgress: CourseProgressEntry[];
@@ -89,6 +90,7 @@ export interface UserProfile {
   diaryEntries: DiaryEntry[];
   achievements: AchievementEntry[];
   chatSessions: Array<Array<{ text: string; sender: 'user' | 'ИИ'; timestamp?: string }>>;
+  dataTruncated?: { diary: boolean; images: boolean; chats: boolean; homework: boolean };
 }
 
 export const useUserProfileStore = defineStore('userProfile', () => {
@@ -194,21 +196,62 @@ export const useUserProfileStore = defineStore('userProfile', () => {
    * payload through updateProfile would issue a pointless PUT on every page load.
    */
   function hydrateProfile(serverProfile: Partial<UserProfile>) {
-    profile.value = { ...profile.value, ...serverProfile };
+    profile.value = {
+      ...getInitialProfile(),
+      ...serverProfile,
+      name: serverProfile.name || '',
+      age: serverProfile.age ?? null,
+      therapyGoals: serverProfile.therapyGoals || '',
+      mainConcerns: serverProfile.mainConcerns || '',
+      preferences: serverProfile.preferences || '',
+      additionalInfo: serverProfile.additionalInfo || '',
+      sleepHours: serverProfile.sleepHours ?? 0,
+      stepsCount: serverProfile.stepsCount ?? 0,
+      heartRateAvg: serverProfile.heartRateAvg ?? 0,
+      interests: Array.isArray(serverProfile.interests) ? serverProfile.interests : [],
+      imageAnalysisHistory: Array.isArray(serverProfile.imageAnalysisHistory)
+        ? serverProfile.imageAnalysisHistory
+        : [],
+      courseProgress: Array.isArray(serverProfile.courseProgress)
+        ? serverProfile.courseProgress
+        : [],
+      homeworkHistory: Array.isArray(serverProfile.homeworkHistory)
+        ? serverProfile.homeworkHistory
+        : [],
+      diaryEntries: Array.isArray(serverProfile.diaryEntries) ? serverProfile.diaryEntries : [],
+      achievements: Array.isArray(serverProfile.achievements) ? serverProfile.achievements : [],
+      chatSessions: Array.isArray(serverProfile.chatSessions) ? serverProfile.chatSessions : [],
+    };
   }
 
-  async function updateProfile(newProfile: Partial<UserProfile>) {
-    profile.value = { ...profile.value, ...newProfile };
+  function resetProfile() {
+    profile.value = getInitialProfile();
+    resetMoodTheme();
+  }
+
+  async function updateProfile(newProfile: Partial<UserProfile>): Promise<boolean> {
     if (shouldSyncToServer()) {
       try {
         await axios.put(`${API_URL}/profile`, newProfile);
+        profile.value = { ...profile.value, ...newProfile };
+        return true;
       } catch (e) {
         console.error('Failed to sync profile with backend', e);
+        return false;
       }
     }
+    return false;
   }
 
-  async function updateCourseProgress(progressEntry: CourseProgressEntry) {
+  async function updateCourseProgress(progressEntry: CourseProgressEntry): Promise<boolean> {
+    if (shouldSyncToServer()) {
+      try {
+        await axios.post(`${API_URL}/courses/${progressEntry.courseId}/progress`, progressEntry);
+      } catch (e) {
+        console.error('Failed to sync course progress with backend', e);
+        return false;
+      }
+    }
     if (!Array.isArray(profile.value.courseProgress)) {
       profile.value.courseProgress = [];
     }
@@ -224,37 +267,37 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       profile.value.courseProgress.push(progressEntry);
     }
 
-    if (shouldSyncToServer()) {
-      try {
-        await axios.post(`${API_URL}/courses/${progressEntry.courseId}/progress`, progressEntry);
-        analyticsStore.recordActivity();
-      } catch (e) {
-        console.error('Failed to sync course progress with backend', e);
-      }
-    }
+    analyticsStore.recordActivity();
+    return true;
   }
 
-  async function addHomeworkSubmission(submission: Omit<HomeworkEntry, 'submissionDate'>) {
+  async function addHomeworkSubmission(
+    submission: Omit<HomeworkEntry, 'submissionDate'>,
+  ): Promise<boolean> {
     const newSubmission: HomeworkEntry = {
       ...submission,
       submissionDate: new Date().toISOString(),
     };
-    if (!Array.isArray(profile.value.homeworkHistory)) {
-      profile.value.homeworkHistory = [];
-    }
-    profile.value.homeworkHistory.unshift(newSubmission);
-
     if (shouldSyncToServer()) {
       try {
-        await axios.post(`${API_URL}/homework`, submission);
-        analyticsStore.recordActivity();
+        const response = await axios.post(`${API_URL}/homework`, submission);
+        newSubmission.submissionDate =
+          response.data.submission?.submissionDate || newSubmission.submissionDate;
       } catch (e) {
         console.error('Failed to sync homework with backend', e);
+        return false;
       }
     }
+    if (!Array.isArray(profile.value.homeworkHistory)) profile.value.homeworkHistory = [];
+    profile.value.homeworkHistory = profile.value.homeworkHistory.filter(
+      (item) => item.homeworkId !== submission.homeworkId,
+    );
+    profile.value.homeworkHistory.unshift(newSubmission);
+    analyticsStore.recordActivity();
+    return true;
   }
 
-  async function addDiaryEntry(entryText: string) {
+  async function addDiaryEntry(entryText: string): Promise<boolean> {
     if (shouldSyncToServer()) {
       try {
         const response = await axios.post(`${API_URL}/diary`, { content: entryText });
@@ -262,13 +305,15 @@ export const useUserProfileStore = defineStore('userProfile', () => {
           id: response.data.id,
           date: response.data.date,
           text: response.data.content,
-          analysis: response.data.riskLevel,
+          analysis: { mood: response.data.riskLevel },
         };
         profile.value.diaryEntries.unshift(newEntry);
         profile.value.points += 10; // Immediate feedback
         analyticsStore.recordActivity();
+        return true;
       } catch (e) {
         console.error('Failed to sync diary with backend', e);
+        return false;
       }
     } else {
       const newEntry: DiaryEntry = {
@@ -279,10 +324,11 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       profile.value.diaryEntries.unshift(newEntry);
       profile.value.points += 10;
       analyticsStore.recordActivity();
+      return true;
     }
   }
 
-  async function updateDiaryEntry(entryId: string, updates: Partial<DiaryEntry>) {
+  async function updateDiaryEntry(entryId: string, updates: Partial<DiaryEntry>): Promise<boolean> {
     const index = profile.value.diaryEntries.findIndex((e) => e.id === entryId);
     if (index > -1) {
       if (shouldSyncToServer() && !entryId.startsWith('diary-')) {
@@ -290,6 +336,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
           await axios.put(`${API_URL}/diary/${entryId}`, { content: updates.text });
         } catch (e) {
           console.error('Failed to update diary on backend', e);
+          return false;
         }
       }
 
@@ -299,19 +346,23 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       }
       profile.value.diaryEntries[index] = { ...profile.value.diaryEntries[index], ...newUpdates };
       analyticsStore.recordActivity();
+      return true;
     }
+    return false;
   }
 
-  async function deleteDiaryEntry(entryId: string) {
+  async function deleteDiaryEntry(entryId: string): Promise<boolean> {
     if (shouldSyncToServer() && !entryId.startsWith('diary-')) {
       try {
         await axios.delete(`${API_URL}/diary/${entryId}`);
       } catch (e) {
         console.error('Failed to delete diary from backend', e);
+        return false;
       }
     }
     profile.value.diaryEntries = profile.value.diaryEntries.filter((e) => e.id !== entryId);
     analyticsStore.recordActivity();
+    return true;
   }
 
   function addImageAnalysis(entry: Omit<ImageAnalysisEntry, 'timestamp'> & { timestamp?: string }) {
@@ -363,6 +414,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
     resetMoodTheme,
     updateProfile,
     hydrateProfile,
+    resetProfile,
     updateCourseProgress,
     addHomeworkSubmission,
     updateHomeworkEntry,

@@ -11,6 +11,12 @@ import {
   getProfile,
   updateProfile,
   generateProfileAnalysis,
+  getAIStatus,
+  updateAIConsent,
+  changePassword,
+  logoutAll,
+  deleteAccount,
+  exportAccountData,
 } from './controllers/authController';
 import {
   getAllCourses,
@@ -24,6 +30,7 @@ import {
   chatStream,
   getSessions,
   getChatHistory,
+  getStoredImage,
 } from './controllers/aiController';
 import {
   createDiaryEntry,
@@ -38,6 +45,12 @@ import {
   getStats,
   getSubmissions,
   gradeSubmission,
+  createModule,
+  deleteModule,
+  createLesson,
+  deleteLesson,
+  createHomework,
+  deleteHomework,
 } from './controllers/adminController';
 import {
   getPublicGallery,
@@ -54,29 +67,57 @@ import {
   getOrgStats,
   getPeerSupport,
   postPeerSupport,
+  leaveOrg,
+  rotateInviteCode,
 } from './controllers/orgController';
 import { getNotifications, markAsRead } from './controllers/notificationController';
-import { getPatients, updateTherapistAccess } from './controllers/therapistController';
+import {
+  getPatients,
+  updateTherapistAccess,
+  getAvailableTherapists,
+} from './controllers/therapistController';
 import { getLeaderboard } from './controllers/leaderboardController';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
-import { authenticateToken, isAdmin, isOrgAdmin, isTherapist } from './middleware/auth';
+import {
+  authenticateToken,
+  isAdmin,
+  isOrgAdmin,
+  isTherapist,
+  requireAIConsent,
+} from './middleware/auth';
 import { updateStreak } from './middleware/gamification';
 import { globalErrorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { logger } from './config/logger';
 import prisma from './config/prisma';
+import { getHealth } from './controllers/healthController';
 
 const app = express();
 const port = Number(process.env.PORT) || 3100;
 
-// Behind nginx (and most PaaS routers) the client address arrives in
-// X-Forwarded-For. Without this, rate limiting and access logs key off the
-// proxy's address, so every user shares one bucket. The value is the number of
-// proxies in front of the app; set TRUST_PROXY=0 when it is exposed directly.
-app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
+// Only reverse proxies on the local host/Docker networks are trusted. This
+// preserves the client IP through the WAF → nginx → backend chain without
+// accepting arbitrary internet-supplied X-Forwarded-For headers.
+const configuredTrustProxy = process.env.TRUST_PROXY;
+app.set(
+  'trust proxy',
+  configuredTrustProxy == null
+    ? ['loopback', 'linklocal', 'uniquelocal', '172.18.0.0/16']
+    : /^\d+$/.test(configuredTrustProxy)
+      ? Number(configuredTrustProxy)
+      : configuredTrustProxy,
+);
 
-app.use(helmet());
+app.use(
+  helmet({
+    // This service returns JSON; the browser-facing CSP is owned by nginx.
+    contentSecurityPolicy: false,
+    // Do not pin the documented localhost HTTP deployment to HTTPS. Public TLS
+    // deployments enable this together with secure cookies.
+    hsts: process.env.COOKIE_SECURE === 'true' ? undefined : false,
+  }),
+);
 
 // Must run before the routes so that every request — including rejected ones —
 // gets a correlation id and an access-log line.
@@ -97,7 +138,15 @@ const limiter = rateLimit({
   // Generous in development (SPA fires several calls per page — a live demo or
   // screenshot pass would otherwise trip the limit); tight in production.
   max: process.env.NODE_ENV === 'production' ? 100 : Number(process.env.RATE_LIMIT_MAX || 5000),
+  skip: (req) => req.path === '/health',
   message: { error: 'Too many requests, please try again later.' },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  skipSuccessfulRequests: true,
+  message: { error: 'Слишком много неудачных попыток. Повторите позже.' },
 });
 
 app.use('/api/', limiter);
@@ -112,6 +161,7 @@ app.use(bodyParser.json({ limit: '10mb' }));
 app.get('/', (req, res) => {
   res.send('Точка Ясности API is running!');
 });
+app.get('/api/health', getHealth);
 
 // Liveness probe — deliberately dependency-free so it stays up even when the
 // database is down, letting the orchestrator distinguish "process is wedged"
@@ -136,22 +186,31 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Auth
-app.post('/api/register', register);
-app.post('/api/login', login);
+app.post('/api/register', authLimiter, register);
+app.post('/api/login', authLimiter, login);
 app.post('/api/logout', logout);
 app.get('/api/profile', authenticateToken, updateStreak, getProfile);
 app.put('/api/profile', authenticateToken, updateStreak, updateProfile);
-app.post('/api/profile/analysis', authenticateToken, generateProfileAnalysis);
+app.put('/api/account/password', authenticateToken, changePassword);
+app.post('/api/account/logout-all', authenticateToken, logoutAll);
+app.delete('/api/account', authenticateToken, deleteAccount);
+app.get('/api/account/export', authenticateToken, exportAccountData);
+app.post('/api/profile/analysis', authenticateToken, requireAIConsent, generateProfileAnalysis);
+app.get('/api/ai/status', authenticateToken, getAIStatus);
+app.put('/api/profile/ai-consent', authenticateToken, updateAIConsent);
 
 // B2B Org
 app.post('/api/org/create', authenticateToken, isAdmin, createOrg);
 app.post('/api/org/join', authenticateToken, joinOrg);
+app.delete('/api/org/leave', authenticateToken, leaveOrg);
+app.post('/api/org/rotate-invite', authenticateToken, isOrgAdmin, rotateInviteCode);
 app.get('/api/org/stats', authenticateToken, isOrgAdmin, getOrgStats);
 app.get('/api/org/peer-support', authenticateToken, getPeerSupport);
 app.post('/api/org/peer-support', authenticateToken, postPeerSupport);
 
 // Therapist
 app.get('/api/therapist/patients', authenticateToken, isTherapist, getPatients);
+app.get('/api/therapists', authenticateToken, getAvailableTherapists);
 app.put('/api/profile/therapist-access', authenticateToken, updateTherapistAccess);
 
 // Courses
@@ -161,11 +220,11 @@ app.post('/api/courses/:courseSlug/progress', authenticateToken, updateStreak, u
 app.post('/api/homework', authenticateToken, updateStreak, submitHomework);
 
 // AI
-app.post('/api/chat', authenticateToken, updateStreak, chat);
-app.post('/api/chat/stream', authenticateToken, updateStreak, chatStream);
+app.post('/api/chat', authenticateToken, requireAIConsent, updateStreak, chat);
+app.post('/api/chat/stream', authenticateToken, requireAIConsent, updateStreak, chatStream);
 app.get('/api/ai/sessions', authenticateToken, getSessions);
 app.get('/api/ai/history/:sessionId', authenticateToken, getChatHistory);
-app.post('/api/analyze-image', authenticateToken, updateStreak, analyzeImage);
+app.post('/api/analyze-image', authenticateToken, requireAIConsent, updateStreak, analyzeImage);
 
 // Diary
 app.post('/api/diary', authenticateToken, updateStreak, createDiaryEntry);
@@ -174,13 +233,14 @@ app.put('/api/diary/:id', authenticateToken, updateStreak, updateDiaryEntry);
 app.delete('/api/diary/:id', authenticateToken, deleteDiaryEntry);
 
 // Analytics & Social
-app.get('/api/leaderboard', getLeaderboard);
+app.get('/api/leaderboard', authenticateToken, getLeaderboard);
 app.get('/api/analytics/mood', authenticateToken, getMoodStats);
 app.get('/api/analytics/correlations', authenticateToken, getCorrelations);
 app.get('/api/challenges', authenticateToken, getChallenges);
 app.post('/api/challenges/join', authenticateToken, joinChallenge);
 app.post('/api/challenges/complete', authenticateToken, completeChallenge);
-app.get('/api/gallery', getPublicGallery);
+app.get('/api/gallery', authenticateToken, getPublicGallery);
+app.get('/api/images/:id', authenticateToken, getStoredImage);
 app.post('/api/gallery/like/:id', authenticateToken, likePost);
 app.put('/api/gallery/toggle-public', authenticateToken, togglePublic);
 app.post('/api/profile/health', authenticateToken, createHealthMetric);
@@ -195,8 +255,18 @@ app.get('/api/admin/stats', authenticateToken, isAdmin, getStats);
 app.post('/api/admin/courses', authenticateToken, isAdmin, createCourse);
 app.put('/api/admin/courses/:id', authenticateToken, isAdmin, updateCourse);
 app.delete('/api/admin/courses/:id', authenticateToken, isAdmin, deleteCourse);
+app.post('/api/admin/courses/:courseId/modules', authenticateToken, isAdmin, createModule);
+app.delete('/api/admin/modules/:id', authenticateToken, isAdmin, deleteModule);
+app.post('/api/admin/modules/:moduleId/lessons', authenticateToken, isAdmin, createLesson);
+app.delete('/api/admin/lessons/:id', authenticateToken, isAdmin, deleteLesson);
+app.post('/api/admin/courses/:courseId/homework', authenticateToken, isAdmin, createHomework);
+app.delete('/api/admin/homework/:id', authenticateToken, isAdmin, deleteHomework);
 app.get('/api/admin/submissions', authenticateToken, isAdmin, getSubmissions);
 app.post('/api/admin/submissions/grade', authenticateToken, isAdmin, gradeSubmission);
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found' });
+});
 
 app.use(globalErrorHandler);
 

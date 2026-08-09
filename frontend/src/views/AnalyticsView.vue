@@ -62,12 +62,12 @@
 
         <template v-else-if="hasMoodData">
           <div class="chart-scroll">
-            <apexchart
+            <ApexChart
               type="line"
               height="350"
               :options="chartOptions"
               :series="chartSeries"
-            ></apexchart>
+            ></ApexChart>
           </div>
           <div class="chart-legend" role="list">
             <span class="legend-item" role="listitem">
@@ -127,6 +127,8 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
+import ApexChart from 'vue3-apexcharts';
+import type { ApexOptions } from 'apexcharts';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -149,7 +151,7 @@ const chartBorderColor = themeToken('--border-color', '#e4eaf5');
 const chartCardBg = themeToken('--card-bg', '#ffffff');
 const chartFontFamily = themeToken('--font-sans', 'ui-sans-serif, system-ui, sans-serif');
 
-const chartOptions = {
+const chartOptions: ApexOptions = {
   chart: {
     id: 'mood-map',
     toolbar: { show: false },

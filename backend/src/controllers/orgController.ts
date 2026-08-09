@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { v4 as uuidv4 } from 'uuid';
+import { organizationCreateSchema, organizationJoinSchema, peerSupportSchema } from '../schemas';
 
 /** One row of the anonymized risk-level breakdown produced by Prisma groupBy. */
 interface RiskStat {
@@ -15,7 +16,9 @@ type HeatmapData = Record<string, { count: number; totalRisk: number }>;
 export const createOrg = async (req: AuthRequest, res: Response) => {
   // Authorization is enforced by the `isAdmin` middleware (fresh DB role check).
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { name } = req.body;
+  const validation = organizationCreateSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid organization name' });
+  const { name } = validation.data;
 
   try {
     const org = await prisma.organization.create({
@@ -32,7 +35,9 @@ export const createOrg = async (req: AuthRequest, res: Response) => {
 
 export const joinOrg = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { inviteCode } = req.body;
+  const validation = organizationJoinSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid invite code' });
+  const inviteCode = validation.data.inviteCode.toUpperCase();
 
   try {
     const org = await prisma.organization.findUnique({ where: { inviteCode } });
@@ -47,6 +52,31 @@ export const joinOrg = async (req: AuthRequest, res: Response) => {
   } catch {
     res.status(500).json({ error: 'Error joining organization' });
   }
+};
+
+export const leaveOrg = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { role: true } });
+  if (user?.role === 'ORG_ADMIN') {
+    return res.status(409).json({ error: 'Сначала передайте права администратора организации' });
+  }
+  await prisma.user.update({ where: { id: req.user.id }, data: { organizationId: null } });
+  res.status(204).end();
+};
+
+export const rotateInviteCode = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { organizationId: true },
+  });
+  if (!user?.organizationId) return res.status(404).json({ error: 'Organization not found' });
+  const organization = await prisma.organization.update({
+    where: { id: user.organizationId },
+    data: { inviteCode: uuidv4().substring(0, 8).toUpperCase() },
+    select: { inviteCode: true },
+  });
+  res.json(organization);
 };
 
 const MIN_ORG_AGGREGATE_RESPONSES = 8;
@@ -71,6 +101,8 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
     if (memberCount < MIN_ORG_AGGREGATE_RESPONSES) {
       return res.json({
         orgName: user.organization?.name,
+        inviteCode: user.organization?.inviteCode,
+        memberCount,
         privacyProtected: true,
         minimumGroupSize: MIN_ORG_AGGREGATE_RESPONSES,
         message: 'Недостаточно участников для отображения групповых агрегатов.',
@@ -91,6 +123,7 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
     if (signalCount < MIN_ORG_AGGREGATE_RESPONSES) {
       return res.json({
         orgName: user.organization?.name,
+        inviteCode: user.organization?.inviteCode,
         memberCount,
         privacyProtected: true,
         minimumGroupSize: MIN_ORG_AGGREGATE_RESPONSES,
@@ -123,6 +156,7 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
 
     res.json({
       orgName: user.organization?.name,
+      inviteCode: user.organization?.inviteCode,
       memberCount,
       privacyProtected: false,
       minimumGroupSize: MIN_ORG_AGGREGATE_RESPONSES,
@@ -193,7 +227,9 @@ export const getPeerSupport = async (req: AuthRequest, res: Response) => {
 
 export const postPeerSupport = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const { content } = req.body;
+  const validation = peerSupportSchema.safeParse(req.body);
+  if (!validation.success) return res.status(400).json({ error: 'Invalid message' });
+  const { content } = validation.data;
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user?.organizationId) return res.status(403).json({ error: 'Not in org' });

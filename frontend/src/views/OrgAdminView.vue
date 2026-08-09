@@ -9,122 +9,152 @@
       </p>
     </header>
 
-    <div v-if="stats.aiExecutiveSummary" class="card ai-summary-card">
-      <span class="medallion medallion-accent"><Icon name="sparkles" :size="22" /></span>
-      <div class="summary-text">
-        <h3>Сводка от ИИ</h3>
-        <p>{{ stats.aiExecutiveSummary }}</p>
+    <div v-if="loading" class="card skeleton" style="height: 220px"></div>
+    <div v-else-if="loadError" class="empty-state">
+      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+      <p>{{ loadError }}</p>
+      <button class="btn-outline" @click="fetchStats">Повторить</button>
+    </div>
+
+    <div v-else-if="stats.privacyProtected" class="card privacy-notice">
+      <span class="medallion"><Icon name="shield" :size="22" /></span>
+      <div>
+        <h2 class="section-title">Статистика защищена</h2>
+        <p class="muted">{{ stats.message }}</p>
+        <p class="faint">
+          Сейчас участников: {{ stats.memberCount || 0 }}. Минимум для групповой статистики:
+          {{ stats.minimumGroupSize || 8 }}.
+        </p>
       </div>
     </div>
 
-    <section class="stats-row">
-      <div class="stat-tile">
-        <span class="stat-ic"><Icon name="users" :size="20" /></span>
-        <div>
-          <div class="stat-val">{{ stats.memberCount || 0 }}</div>
-          <div class="stat-lbl">сотрудников</div>
+    <template v-if="!loading && !loadError && !stats.privacyProtected">
+      <div v-if="stats.executiveSummary" class="card ai-summary-card">
+        <span class="medallion medallion-accent"><Icon name="sparkles" :size="22" /></span>
+        <div class="summary-text">
+          <h3>Сводка от ИИ</h3>
+          <p>{{ stats.executiveSummary }}</p>
         </div>
       </div>
-      <div class="stat-tile" v-for="risk in stats.riskStats" :key="risk.riskLevel">
-        <span class="stat-ic" :style="riskIconStyle(risk.riskLevel)"
-          ><Icon :name="riskIcon(risk.riskLevel)" :size="20"
-        /></span>
-        <div>
-          <div class="stat-val">{{ risk._count }}</div>
-          <div class="stat-lbl">{{ riskLabel(risk.riskLevel) }}</div>
-        </div>
-      </div>
-    </section>
 
-    <div class="grid grid-2">
-      <section class="card chart-card">
-        <div class="section-head">
-          <h2 class="section-title">Динамика вовлечённости (7 дней)</h2>
-        </div>
-        <apexchart
-          type="line"
-          height="200"
-          :options="trendOptions"
-          :series="trendSeries"
-        ></apexchart>
-      </section>
-
-      <section class="card chart-card">
-        <div class="section-head"><h2 class="section-title">Распределение состояний</h2></div>
-        <div v-if="stats.riskStats?.length" class="risk-distribution">
-          <div v-for="risk in stats.riskStats" :key="risk.riskLevel" class="risk-item">
-            <div class="row-between risk-item-head">
-              <span :class="['chip', riskBadgeClass(risk.riskLevel)]">{{
-                riskLabel(risk.riskLevel)
-              }}</span>
-              <span class="muted">{{ risk._count }}</span>
-            </div>
-            <div class="bar-container">
-              <div
-                class="bar"
-                :style="{
-                  width: (risk._count / (stats.memberCount || 1)) * 100 + '%',
-                  backgroundColor: getRiskColor(risk.riskLevel),
-                }"
-              ></div>
-            </div>
+      <section class="stats-row">
+        <div class="stat-tile">
+          <span class="stat-ic"><Icon name="users" :size="20" /></span>
+          <div>
+            <div class="stat-val">{{ stats.memberCount || 0 }}</div>
+            <div class="stat-lbl">сотрудников</div>
           </div>
         </div>
-        <p v-else class="muted">Данных для анализа пока недостаточно.</p>
-      </section>
-    </div>
-
-    <section class="card heatmap-section">
-      <div class="section-head">
-        <h2 class="section-title">Карта психологического климата</h2>
-        <div class="metric-toggles" role="group" aria-label="Метрика карты">
-          <button
-            type="button"
-            :class="['toggle-btn', { active: heatmapMetric === 'stress' }]"
-            @click="heatmapMetric = 'stress'"
-          >
-            Стресс
-          </button>
-          <button
-            type="button"
-            :class="['toggle-btn', { active: heatmapMetric === 'activity' }]"
-            @click="heatmapMetric = 'activity'"
-          >
-            Активность
-          </button>
+        <div class="stat-tile" v-for="risk in stats.riskStats" :key="risk.riskLevel">
+          <span class="stat-ic" :style="riskIconStyle(risk.riskLevel)"
+            ><Icon :name="riskIcon(risk.riskLevel)" :size="20"
+          /></span>
+          <div>
+            <div class="stat-val">{{ risk._count }}</div>
+            <div class="stat-lbl">{{ riskLabel(risk.riskLevel) }}</div>
+          </div>
         </div>
-      </div>
-      <apexchart
-        type="heatmap"
-        height="350"
-        :options="chartOptions"
-        :series="chartSeries"
-      ></apexchart>
-      <p class="chart-hint muted">
-        <Icon name="eye" :size="14" />
-        Кликните на ячейку для детального анализа событий этого периода.
-      </p>
-    </section>
+      </section>
 
-    <section v-if="stats.hrRecommendations?.length" class="card recommendations-section">
-      <div class="section-head">
-        <span class="medallion"><Icon name="lightbulb" :size="20" /></span>
-        <h2 class="section-title">Рекомендуемые действия для HR</h2>
-      </div>
-      <ul class="rec-list">
-        <li v-for="rec in stats.hrRecommendations" :key="rec">
-          <Icon name="check" :size="16" />
-          <span>{{ rec }}</span>
-        </li>
-      </ul>
-    </section>
+      <div class="grid grid-2">
+        <section class="card chart-card">
+          <div class="section-head">
+            <h2 class="section-title">Динамика вовлечённости (7 дней)</h2>
+          </div>
+          <ApexChart
+            type="line"
+            height="200"
+            :options="trendOptions"
+            :series="trendSeries"
+          ></ApexChart>
+        </section>
 
-    <section class="card invite-card">
+        <section class="card chart-card">
+          <div class="section-head"><h2 class="section-title">Распределение состояний</h2></div>
+          <div v-if="stats.riskStats?.length" class="risk-distribution">
+            <div v-for="risk in stats.riskStats" :key="risk.riskLevel" class="risk-item">
+              <div class="row-between risk-item-head">
+                <span :class="['chip', riskBadgeClass(risk.riskLevel)]">{{
+                  riskLabel(risk.riskLevel)
+                }}</span>
+                <span class="muted">{{ risk._count }}</span>
+              </div>
+              <div class="bar-container">
+                <div
+                  class="bar"
+                  :style="{
+                    width: (risk._count / (stats.memberCount || 1)) * 100 + '%',
+                    backgroundColor: getRiskColor(risk.riskLevel),
+                  }"
+                ></div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="muted">Данных для анализа пока недостаточно.</p>
+        </section>
+      </div>
+
+      <section class="card heatmap-section">
+        <div class="section-head">
+          <h2 class="section-title">Карта психологического климата</h2>
+          <div class="metric-toggles" role="group" aria-label="Метрика карты">
+            <button
+              type="button"
+              :class="['toggle-btn', { active: heatmapMetric === 'stress' }]"
+              @click="heatmapMetric = 'stress'"
+            >
+              Стресс
+            </button>
+            <button
+              type="button"
+              :class="['toggle-btn', { active: heatmapMetric === 'activity' }]"
+              @click="heatmapMetric = 'activity'"
+            >
+              Активность
+            </button>
+          </div>
+        </div>
+        <ApexChart
+          type="heatmap"
+          height="350"
+          :options="chartOptions"
+          :series="chartSeries"
+        ></ApexChart>
+        <p class="chart-hint muted">
+          <Icon name="eye" :size="14" />
+          Кликните на ячейку для детального анализа событий этого периода.
+        </p>
+      </section>
+
+      <section v-if="stats.hrRecommendations?.length" class="card recommendations-section">
+        <div class="section-head">
+          <span class="medallion"><Icon name="lightbulb" :size="20" /></span>
+          <h2 class="section-title">Рекомендуемые действия для HR</h2>
+        </div>
+        <ul class="rec-list">
+          <li v-for="rec in stats.hrRecommendations" :key="rec">
+            <Icon name="check" :size="16" />
+            <span>{{ rec }}</span>
+          </li>
+        </ul>
+      </section>
+    </template>
+
+    <section v-if="!loading && !loadError && stats.inviteCode" class="card invite-card">
       <span class="medallion"><Icon name="user-plus" :size="20" /></span>
       <div class="invite-text">
         <div class="invite-label muted">Код приглашения сотрудников</div>
-        <div class="invite-code">{{ inviteCode }}</div>
+        <div class="invite-code">{{ stats.inviteCode }}</div>
       </div>
+      <button
+        type="button"
+        class="btn-outline btn-sm rotate-code"
+        :disabled="isRotatingCode"
+        @click="rotateInviteCode"
+      >
+        <Icon name="refresh-cw" :size="16" />
+        {{ isRotatingCode ? 'Обновляем…' : 'Сменить код' }}
+      </button>
     </section>
   </div>
 </template>
@@ -133,8 +163,12 @@
 import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
+import ApexChart from 'vue3-apexcharts';
+import type { ApexChartEventOpts, ApexOptions } from 'apexcharts';
+import { useToastStore } from '@/stores/toastStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+const toastStore = useToastStore();
 
 interface RiskStat {
   riskLevel: string;
@@ -152,8 +186,12 @@ interface OrgStats {
   riskStats: RiskStat[];
   heatmapData: Record<string, HeatmapCell>;
   trends: { date: string; _count: number }[];
-  aiExecutiveSummary: string;
+  executiveSummary?: string;
   hrRecommendations?: string[];
+  inviteCode?: string;
+  privacyProtected?: boolean;
+  minimumGroupSize?: number;
+  message?: string;
 }
 
 const stats = ref<OrgStats>({
@@ -162,12 +200,15 @@ const stats = ref<OrgStats>({
   riskStats: [],
   heatmapData: {},
   trends: [],
-  aiExecutiveSummary: '',
 });
-const inviteCode = ref('ЗАГРУЗКА...');
 const heatmapMetric = ref('stress');
+const loading = ref(true);
+const loadError = ref('');
+const isRotatingCode = ref(false);
+const heatmapDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const heatmapTimeSlots = [0, 4, 8, 12, 16, 20];
 
-const trendOptions = {
+const trendOptions: ApexOptions = {
   chart: { toolbar: { show: false } },
   stroke: { curve: 'smooth' },
   xaxis: { type: 'datetime' },
@@ -177,26 +218,20 @@ const trendOptions = {
 const trendSeries = computed(() => [
   {
     name: 'Количество сессий',
-    data: stats.value.trends.map((t) => ({ x: t.date, y: t._count })),
+    data: (stats.value.trends || []).map((t) => ({ x: t.date, y: t._count })),
   },
 ]);
 
-const chartOptions = {
+const chartOptions: ApexOptions = {
   chart: {
     toolbar: { show: false },
     events: {
-      dataPointSelection: (
-        _event: unknown,
-        _chartContext: unknown,
-        config: {
-          seriesIndex: number;
-          dataPointIndex: number;
-          w: { config: { series: { name: string }[]; xaxis: { categories: string[] } } };
-        },
-      ) => {
-        alert(
-          `Детальный анализ за ${config.w.config.series[config.seriesIndex].name}, слот ${config.w.config.xaxis.categories[config.dataPointIndex]}: В этот период преобладали сессии в чате с ИИ.`,
-        );
+      dataPointSelection: (_event, _chartContext, config?: ApexChartEventOpts) => {
+        if (!config) return;
+        const day = heatmapDays[config.seriesIndex] || 'выбранный день';
+        const startHour = heatmapTimeSlots[config.dataPointIndex];
+        const slot = startHour === undefined ? 'выбранный период' : `${startHour}–${startHour + 4}`;
+        toastStore.info(`${day}, ${slot}: агрегированная активность сотрудников за этот период.`);
       },
     },
   },
@@ -208,26 +243,20 @@ const chartOptions = {
     categories: ['0-4', '4-8', '8-12', '12-16', '16-20', '20-24'],
     title: { text: 'Часы суток' },
   },
-  yaxis: {
-    categories: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
-  },
 };
 
 const chartSeries = computed(() => {
-  const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-  const timeSlots = [0, 4, 8, 12, 16, 20];
-
-  return days.map((dayName, dayIndex) => {
+  return heatmapDays.map((dayName, dayIndex) => {
     const jsDay = (dayIndex + 1) % 7;
 
     return {
       name: dayName,
-      data: timeSlots.map((startHour) => {
+      data: heatmapTimeSlots.map((startHour) => {
         let totalVal = 0;
         let count = 0;
         for (let h = startHour; h < startHour + 4; h++) {
           const key = `${jsDay}-${h}`;
-          if (stats.value.heatmapData[key]) {
+          if (stats.value.heatmapData?.[key]) {
             if (heatmapMetric.value === 'stress') {
               totalVal += stats.value.heatmapData[key].totalRisk;
               count += stats.value.heatmapData[key].count;
@@ -246,16 +275,41 @@ const chartSeries = computed(() => {
   });
 });
 
-onMounted(async () => {
+const fetchStats = async () => {
+  loading.value = true;
+  loadError.value = '';
   try {
     const response = await axios.get(`${API_URL}/org/stats`);
-    stats.value = response.data;
-
-    inviteCode.value = 'B2B-PRO-2026';
+    stats.value = {
+      ...stats.value,
+      ...response.data,
+      riskStats: response.data.riskStats || [],
+      heatmapData: response.data.heatmapData || {},
+      trends: response.data.trends || [],
+    };
   } catch (error) {
     console.error('Failed to fetch org stats:', error);
+    loadError.value = 'Не удалось загрузить статистику организации.';
+  } finally {
+    loading.value = false;
   }
-});
+};
+
+const rotateInviteCode = async () => {
+  if (!window.confirm('Старый код перестанет работать. Создать новый?')) return;
+  isRotatingCode.value = true;
+  try {
+    const response = await axios.post(`${API_URL}/org/rotate-invite`);
+    stats.value.inviteCode = response.data.inviteCode;
+    toastStore.success('Код приглашения обновлён.');
+  } catch {
+    toastStore.error('Не удалось обновить код приглашения.');
+  } finally {
+    isRotatingCode.value = false;
+  }
+};
+
+onMounted(fetchStats);
 
 const getRiskColor = (level: string) => {
   if (level === 'high') return '#f44336';
@@ -289,6 +343,15 @@ const riskIconStyle = (level: string) => {
 <style scoped>
 .page-head {
   margin-bottom: var(--space-5);
+}
+
+.privacy-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.privacy-notice p {
+  margin: var(--space-2) 0 0;
 }
 
 .ai-summary-card {
@@ -454,6 +517,9 @@ const riskIconStyle = (level: string) => {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+}
+.rotate-code {
+  margin-left: auto;
 }
 .invite-label {
   font-size: var(--text-sm);
