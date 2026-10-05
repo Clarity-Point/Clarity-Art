@@ -12,12 +12,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "axios": "^1.19.0",
-    "dompurify": "^3.4.13",
-    "pinia": "^4.0.2",
-    "vue": "^3.5.41",
+    "axios": "^1.20.0",
+    "dompurify": "^3.4.16",
+    "pinia": "^4.0.3",
+    "vue": "^3.5.43",
     "vue-markdown-render": "^2.3.1",
-    "vue-router": "^5.2.0"
+    "vue-router": "^5.3.1"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",
