@@ -629,6 +629,12 @@ const triggerCanvasAnalysis = () => {
   touch-action: none;
   max-width: 100%;
 }
+/*
+ * Fullscreen must sit above the entire app shell. GlobalHeader is z-index 1000
+ * and SidebarMenu 1002, so anything below that leaves the fixed header and
+ * sidebar painted over the canvas — the drawing surface appeared clipped and the
+ * exit button unreachable.
+ */
 .drawing-canvas.fullscreen {
   width: 100vw;
   height: 100vh;
@@ -637,13 +643,13 @@ const triggerCanvasAnalysis = () => {
   border: none;
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-fullscreen-canvas);
 }
 
 .fullscreen-mode {
   position: fixed;
   inset: 0;
-  z-index: 999;
+  z-index: var(--z-fullscreen);
   background: var(--bg-color);
   display: flex;
   flex-direction: column;
@@ -656,7 +662,7 @@ const triggerCanvasAnalysis = () => {
   bottom: var(--space-6);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1001;
+  z-index: var(--z-fullscreen-canvas);
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);

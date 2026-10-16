@@ -8,3 +8,7 @@ backend/prisma/migrations/
 **/*.min.js
 frontend/public/
 frontend/src/assets/
+
+playwright-report/
+test-results/
+artifacts/

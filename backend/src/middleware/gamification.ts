@@ -15,7 +15,10 @@ export const rewardPoints = async (userId: string, points: number, _reason?: str
   try {
     await checkAchievements(userId);
   } catch (error) {
-    console.error('Achievement calculation error:', error);
+    // Logged through pino, not console: a bare console.error bypasses the
+    // transport's redaction list and emits an unstructured line that a log
+    // aggregator cannot index.
+    log.error({ err: error, userId }, 'Achievement calculation error');
   }
 };
 

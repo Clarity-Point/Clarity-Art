@@ -4,7 +4,7 @@
 #   docker compose -f docker-compose.dev.yml up --build
 #
 # Frontend  http://localhost:5173   (Vite, HMR)
-# Backend   http://localhost:3100   (nodemon; Swagger at /api-docs)
+# Backend   http://localhost:3100   (node --watch; Swagger at /api-docs)
 # Postgres  localhost:5433          (published so you can attach a GUI client)
 #
 # Logs are pretty-printed and set to debug — see docker-compose.yml for the

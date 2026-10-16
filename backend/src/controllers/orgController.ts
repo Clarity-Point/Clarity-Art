@@ -1,8 +1,9 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { organizationCreateSchema, organizationJoinSchema, peerSupportSchema } from '../schemas';
+import { recordAudit } from '../services/auditService';
 import {
   buildPrivacySafeOrgAnalytics,
   MIN_ORG_AGGREGATE_RESPONSES,
@@ -26,7 +27,7 @@ export const createOrg = async (req: AuthRequest, res: Response) => {
     const org = await prisma.organization.create({
       data: {
         name,
-        inviteCode: uuidv4().substring(0, 8).toUpperCase(),
+        inviteCode: randomUUID().substring(0, 8).toUpperCase(),
       },
     });
     res.status(201).json(org);
@@ -50,6 +51,17 @@ export const joinOrg = async (req: AuthRequest, res: Response) => {
       data: { organizationId: org.id },
     });
 
+    // Joining puts the person inside an employer-visible group. The org name is
+    // deliberately not copied into the audit entry — only the ids, so the trail
+    // stays useful without becoming a second copy of the org directory.
+    recordAudit({
+      action: 'org.joined',
+      actorId: req.user.id,
+      subjectId: org.id,
+      outcome: 'success',
+      requestId: req.id,
+      ip: req.ip,
+    });
     res.json({ message: `Successfully joined ${org.name}` });
   } catch {
     res.status(500).json({ error: 'Error joining organization' });
@@ -58,11 +70,23 @@ export const joinOrg = async (req: AuthRequest, res: Response) => {
 
 export const leaveOrg = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { role: true } });
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { role: true, organizationId: true },
+  });
   if (user?.role === 'ORG_ADMIN') {
     return res.status(409).json({ error: 'Сначала передайте права администратора организации' });
   }
+  const previousOrg = user?.organizationId ?? undefined;
   await prisma.user.update({ where: { id: req.user.id }, data: { organizationId: null } });
+  recordAudit({
+    action: 'org.left',
+    actorId: req.user.id,
+    subjectId: previousOrg,
+    outcome: 'success',
+    requestId: req.id,
+    ip: req.ip,
+  });
   res.status(204).end();
 };
 
@@ -75,8 +99,18 @@ export const rotateInviteCode = async (req: AuthRequest, res: Response) => {
   if (!user?.organizationId) return res.status(404).json({ error: 'Organization not found' });
   const organization = await prisma.organization.update({
     where: { id: user.organizationId },
-    data: { inviteCode: uuidv4().substring(0, 8).toUpperCase() },
+    data: { inviteCode: randomUUID().substring(0, 8).toUpperCase() },
     select: { inviteCode: true },
+  });
+  // Rotating invalidates the previous code, which is the revocation mechanism
+  // for an org whose invite leaked. Recorded so the timing is reconstructable.
+  recordAudit({
+    action: 'org.invite_rotated',
+    actorId: req.user.id,
+    subjectId: user.organizationId,
+    outcome: 'success',
+    requestId: req.id,
+    ip: req.ip,
   });
   res.json(organization);
 };

@@ -10,15 +10,14 @@
       </div>
     </header>
 
-    <div class="technique-selector" role="tablist" aria-label="Выбор техники дыхания">
+    <div class="technique-selector" role="group" aria-label="Выбор техники дыхания">
       <button
         v-for="ex in exercises"
         :key="ex.id"
         type="button"
-        role="tab"
         class="technique-chip"
         :class="{ active: currentEx.id === ex.id }"
-        :aria-selected="currentEx.id === ex.id"
+        :aria-pressed="currentEx.id === ex.id"
         @click="selectExercise(ex)"
       >
         {{ ex.name }}
@@ -30,7 +29,7 @@
         <span class="ring ring-outer" aria-hidden="true"></span>
         <span class="ring ring-mid" aria-hidden="true"></span>
         <div class="breathing-circle" :style="circleStyle">
-          <span class="phase-label">{{ phaseText }}</span>
+          <span class="phase-label" role="status" aria-live="polite">{{ phaseText }}</span>
           <span v-if="isActive" class="phase-timer">{{ timer }}</span>
           <span v-else class="phase-hint">Готовы начать?</span>
         </div>
@@ -312,6 +311,15 @@ onUnmounted(() => stop());
   }
   .phase-timer {
     font-size: var(--text-2xl);
+  }
+}
+</style>
+
+<style scoped>
+@media (prefers-reduced-motion: reduce) {
+  .breathing-circle {
+    transform: none !important;
+    transition: none !important;
   }
 }
 </style>

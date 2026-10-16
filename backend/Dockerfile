@@ -27,7 +27,7 @@ RUN npm run prisma:generate --workspace backend \
 # ── Runtime dependencies ────────────────────────────────────────────────────
 # Built for the target platform, because Prisma ships native query engines.
 # Installing only production dependencies also keeps TypeScript, Vitest and
-# nodemon out of the final image.
+# ts-node out of the final image.
 FROM node:${NODE_VERSION} AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./

@@ -1,4 +1,4 @@
-import { ref, watch, computed } from 'vue'; // Added computed
+import { ref, watch, computed } from 'vue';
 import { defineStore } from 'pinia';
 
 const ANALYTICS_STORAGE_KEY = 'appAnalyticsData';
@@ -78,28 +78,14 @@ export const useAnalyticsStore = defineStore('analytics', () => {
         // First ever activity
         state.value.currentStreak = 1;
       } else {
-        const lastDate = new Date(lastDateStr);
-        const today = new Date(todayStr);
-
-        const lastDateMidnight = new Date(
-          lastDate.getFullYear(),
-          lastDate.getMonth(),
-          lastDate.getDate(),
-        );
-        const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-        const diffTime = Math.abs(todayMidnight.getTime() - lastDateMidnight.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (diffDays === 1) {
-          state.value.currentStreak += 1;
-        } else if (diffDays > 1) {
-          // Gap in activity
-          state.value.currentStreak = 1;
-        }
-        // If diffDays is 0, it means lastDateStr was not todayStr, but somehow it's the same day.
-        // This case should ideally not happen if lastDateStr !== todayStr check is robust.
-        // If it's a new day, streak is either incremented or reset.
+        const [year, month, day] = lastDateStr.split('-').map(Number);
+        const today = new Date();
+        // Compare calendar days, independent of UTC parsing and DST changes.
+        const previousDay = Date.UTC(year, month - 1, day);
+        const currentDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+        const diffDays = (currentDay - previousDay) / 86_400_000;
+        if (diffDays === 1) state.value.currentStreak += 1;
+        else if (diffDays > 1) state.value.currentStreak = 1;
       }
       state.value.lastActivityDate = todayStr;
     }
@@ -115,12 +101,14 @@ export const useAnalyticsStore = defineStore('analytics', () => {
       state.value = {
         ownerId,
         currentStreak: serverStreak,
-        lastActivityDate: null,
+        lastActivityDate: getTodayDateString(),
         activityHistory: {},
       };
       return;
     }
     state.value.currentStreak = serverStreak;
+    // GET /profile already records today’s activity on the backend.
+    state.value.lastActivityDate = getTodayDateString();
   }
 
   function clearUserAnalytics() {

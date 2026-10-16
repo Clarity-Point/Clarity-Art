@@ -101,6 +101,7 @@
             <button
               type="button"
               :class="['toggle-btn', { active: heatmapMetric === 'stress' }]"
+              :aria-pressed="heatmapMetric === 'stress'"
               @click="heatmapMetric = 'stress'"
             >
               Стресс
@@ -108,13 +109,19 @@
             <button
               type="button"
               :class="['toggle-btn', { active: heatmapMetric === 'activity' }]"
+              :aria-pressed="heatmapMetric === 'activity'"
               @click="heatmapMetric = 'activity'"
             >
               Активность
             </button>
           </div>
         </div>
-        <div class="privacy-heatmap" role="table" aria-label="Групповая карта активности">
+        <div
+          class="privacy-heatmap"
+          role="group"
+          tabindex="0"
+          aria-label="Групповая карта активности"
+        >
           <div class="heatmap-corner"></div>
           <div v-for="slot in heatmapSlotLabels" :key="slot" class="heatmap-axis">
             {{ slot }}
@@ -128,6 +135,7 @@
               class="heatmap-cell"
               :class="heatmapCellClass(cell.value)"
               :disabled="cell.count === 0"
+              :aria-label="`${row.day}, ${cell.slot}: ${cell.count > 0 ? cell.value : 'нет данных'}`"
               @click="showHeatmapDetails(row.day, cell.slot, cell.count)"
             >
               {{ cell.count > 0 ? cell.value : '—' }}
@@ -571,5 +579,22 @@ const riskIconStyle = (level: string) => {
   .grid-2 {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style scoped>
+.privacy-heatmap {
+  min-width: 0;
+  max-width: 100%;
+}
+.heatmap-header,
+.invite-card {
+  flex-wrap: wrap;
+}
+.metric-toggles {
+  flex-wrap: wrap;
+}
+.invite-code {
+  overflow-wrap: anywhere;
 }
 </style>

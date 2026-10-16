@@ -76,9 +76,9 @@
 import { ref, computed } from 'vue';
 import DOMPurify from 'dompurify';
 import Icon from '@/components/Icon.vue';
-import artIntroImage from '@/assets/vvedenie-v-art.jpeg';
-import emotionImage from '@/assets/razvitie_emotii.jpeg';
-import musicImage from '@/assets/tvorvhestvo-dlya-vseh.jpg';
+import artIntroImage from '@/assets/images/vvedenie-v-art.jpeg';
+import emotionImage from '@/assets/images/razvitie_emotii.jpeg';
+import musicImage from '@/assets/images/tvorvhestvo-dlya-vseh.jpg';
 
 const searchQuery = ref('');
 interface Article {

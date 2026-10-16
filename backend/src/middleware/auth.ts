@@ -28,8 +28,21 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 
   if (!token) return res.status(401).json({ error: 'No session provided' });
 
+  let decoded: SessionClaims;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as SessionClaims;
+    decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SessionClaims;
+    if (
+      typeof decoded.id !== 'string' ||
+      !decoded.id ||
+      !Number.isInteger(decoded.sessionVersion)
+    ) {
+      return res.status(401).json({ error: 'Invalid session claims' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired session' });
+  }
+
+  try {
     const currentUser = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: { id: true, email: true, role: true, sessionVersion: true },
@@ -40,16 +53,18 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     req.user = currentUser;
     next();
   } catch {
-    return res.status(401).json({ error: 'Invalid or expired session' });
+    // A database outage says nothing about token validity. Reporting 401 here
+    // would log out every client during a temporary infrastructure failure.
+    return res.status(503).json({ error: 'Не удалось проверить сессию. Повторите запрос позже.' });
   }
 };
 
 export const checkRole = (roles: string[]) => {
-  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (user && roles.includes(user.role)) {
+    // authenticateToken already loaded this role from the database for this request.
+    if (roles.includes(req.user.role)) {
       next();
     } else {
       res.status(403).json({ error: `Access denied. Requires one of: ${roles.join(', ')}` });
@@ -60,7 +75,6 @@ export const checkRole = (roles: string[]) => {
 export const isAdmin = checkRole(['ADMIN']);
 export const isTherapist = checkRole(['THERAPIST', 'ADMIN']);
 export const isOrgAdmin = checkRole(['ORG_ADMIN', 'ADMIN']);
-export const isMentor = checkRole(['MENTOR', 'ADMIN']);
 
 export const requireAIConsent = async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });

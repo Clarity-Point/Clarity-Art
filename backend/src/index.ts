@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import express from 'express';
-import bodyParser from 'body-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -88,6 +87,7 @@ import {
 } from './middleware/auth';
 import { updateStreak } from './middleware/gamification';
 import { globalErrorHandler } from './middleware/errorHandler';
+import { requestOrigin } from './middleware/requestOrigin';
 import { requestLogger } from './middleware/requestLogger';
 import { logger } from './config/logger';
 import prisma from './config/prisma';
@@ -132,6 +132,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use('/api', requestOrigin);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -149,14 +150,38 @@ const authLimiter = rateLimit({
   message: { error: 'Слишком много неудачных попыток. Повторите позже.' },
 });
 
-app.use('/api/', limiter);
+/*
+ * AI-backed endpoints are the only ones that cost money per call and hold a
+ * provider connection open for seconds. The global budget above is a page-view
+ * budget — a single user can legitimately spend it in a couple of minutes — so
+ * without a dedicated limiter a handful of clients could spend the operator's
+ * whole provider quota in an afternoon.
+ */
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 20 : 200,
+  message: { error: 'Слишком много запросов к ИИ-ассистенту. Сделайте паузу и попробуйте снова.' },
+});
+
+/*
+ * Uploads and PDF/JSON exports are the expensive paths: they decode a
+ * multi-megabyte body and stream a document back.
+ */
+const heavyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 30 : 300,
+  message: { error: 'Слишком много операций. Сделайте паузу и попробуйте снова.' },
+});
+
+app.disable('x-powered-by');
 // API responses can contain private diary, chat, image and profile data. Do not
 // permit browsers, intermediaries or service workers to persist them by default.
 app.use('/api/', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use('/api/', limiter);
+app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => {
   res.send('Точка Ясности API is running!');
@@ -194,8 +219,13 @@ app.put('/api/profile', authenticateToken, updateStreak, updateProfile);
 app.put('/api/account/password', authenticateToken, changePassword);
 app.post('/api/account/logout-all', authenticateToken, logoutAll);
 app.delete('/api/account', authenticateToken, deleteAccount);
-app.get('/api/account/export', authenticateToken, exportAccountData);
-app.post('/api/profile/analysis', authenticateToken, requireAIConsent, generateProfileAnalysis);
+app.post(
+  '/api/profile/analysis',
+  authenticateToken,
+  requireAIConsent,
+  aiLimiter,
+  generateProfileAnalysis,
+);
 app.get('/api/ai/status', authenticateToken, getAIStatus);
 app.put('/api/profile/ai-consent', authenticateToken, updateAIConsent);
 
@@ -220,11 +250,26 @@ app.post('/api/courses/:courseSlug/progress', authenticateToken, updateStreak, u
 app.post('/api/homework', authenticateToken, updateStreak, submitHomework);
 
 // AI
-app.post('/api/chat', authenticateToken, requireAIConsent, updateStreak, chat);
-app.post('/api/chat/stream', authenticateToken, requireAIConsent, updateStreak, chatStream);
+app.post('/api/chat', authenticateToken, requireAIConsent, updateStreak, aiLimiter, chat);
+app.post(
+  '/api/chat/stream',
+  authenticateToken,
+  requireAIConsent,
+  updateStreak,
+  aiLimiter,
+  chatStream,
+);
 app.get('/api/ai/sessions', authenticateToken, getSessions);
 app.get('/api/ai/history/:sessionId', authenticateToken, getChatHistory);
-app.post('/api/analyze-image', authenticateToken, requireAIConsent, updateStreak, analyzeImage);
+app.post(
+  '/api/analyze-image',
+  authenticateToken,
+  requireAIConsent,
+  updateStreak,
+  aiLimiter,
+  heavyLimiter,
+  analyzeImage,
+);
 
 // Diary
 app.post('/api/diary', authenticateToken, updateStreak, createDiaryEntry);
@@ -244,7 +289,8 @@ app.get('/api/images/:id', authenticateToken, getStoredImage);
 app.post('/api/gallery/like/:id', authenticateToken, likePost);
 app.put('/api/gallery/toggle-public', authenticateToken, togglePublic);
 app.post('/api/profile/health', authenticateToken, createHealthMetric);
-app.get('/api/profile/export-pdf', authenticateToken, exportDiaryPDF);
+app.get('/api/profile/export-pdf', authenticateToken, heavyLimiter, exportDiaryPDF);
+app.get('/api/account/export', authenticateToken, heavyLimiter, exportAccountData);
 
 // Notifications
 app.get('/api/notifications', authenticateToken, getNotifications);

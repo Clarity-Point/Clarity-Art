@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createLogger } from '../config/logger';
+import { recordAudit } from '../services/auditService';
 
 const log = createLogger('therapistController');
 
@@ -30,19 +31,27 @@ export const getPatients = async (req: AuthRequest, res: Response) => {
         therapistId: req.user.id,
         profile: { isSharedWithTherapist: true },
       },
-      include: {
-        profile: true,
+      // This endpoint handles especially sensitive data. Keep an explicit
+      // allow-list so account credentials and newly-added User/Profile columns
+      // can never become part of the response by accident.
+      select: {
+        id: true,
+        email: true,
+        streak: true,
+        points: true,
+        profile: {
+          select: { name: true, attentionScore: true, sleepHours: true },
+        },
         diaryEntries: {
           orderBy: { date: 'desc' },
           take: 10,
           select: { id: true, content: true, date: true, riskLevel: true, tags: true },
         },
-        chatSessions: { take: 5, orderBy: { date: 'desc' }, include: { messages: { take: 1 } } },
-        challenges: {
-          where: { completed: false },
-          include: { challenge: true },
+        chatSessions: {
+          take: 5,
+          orderBy: { date: 'desc' },
+          select: { id: true, date: true, riskLevel: true },
         },
-        imageAnalyses: { take: 3, orderBy: { date: 'desc' } },
       },
       orderBy: {
         profile: {
@@ -83,6 +92,22 @@ export const updateTherapistAccess = async (req: AuthRequest, res: Response) => 
         therapistId: isSharedWithTherapist ? therapistId : null,
         profile: { update: { isSharedWithTherapist } },
       },
+    });
+    /*
+     * Sharing is the point at which a third party gains standing access to a
+     * person's diary, chat history and safety signals. Both the grant and the
+     * revocation belong in the audit trail: a complaint about "my therapist
+     * read my diary" is only answerable if both boundaries were recorded.
+     */
+    recordAudit({
+      action: isSharedWithTherapist
+        ? 'privacy.therapist_access_granted'
+        : 'privacy.therapist_access_revoked',
+      actorId: req.user.id,
+      subjectId: isSharedWithTherapist ? therapistId : undefined,
+      outcome: 'success',
+      requestId: req.id,
+      ip: req.ip,
     });
     res.json({ message: 'Therapist access updated' });
   } catch {

@@ -140,7 +140,11 @@
       <div v-else class="stack">
         <article v-for="entry in sortedDiaryEntries" :key="entry.id" class="card entry-card">
           <div v-if="editingEntryId === entry.id" class="entry-edit-mode">
-            <textarea v-model="currentEditText" class="edit-textarea"></textarea>
+            <textarea
+              aria-label="Текст записи"
+              v-model="currentEditText"
+              class="edit-textarea"
+            ></textarea>
             <div class="edit-actions">
               <button class="btn-outline btn-sm" @click="cancelEdit">Отмена</button>
               <button class="btn-primary btn-sm" @click="saveEdit">Сохранить</button>
@@ -339,7 +343,7 @@ const { weekDayLabels, monthLabel, prevMonth, nextMonth, calendarDays, getEntryF
 
 .calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--space-1);
 }
 .calendar-weekdays {
@@ -534,6 +538,19 @@ const { weekDayLabels, monthLabel, prevMonth, nextMonth, calendarDays, getEntryF
   }
   .calendar-cell {
     font-size: var(--text-xs);
+  }
+}
+</style>
+
+<style scoped>
+@media (max-width: 560px) {
+  .calendar-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .calendar-cell {
+    min-width: 0;
+    padding: 0;
   }
 }
 </style>

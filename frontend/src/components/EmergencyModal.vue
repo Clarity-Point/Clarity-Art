@@ -2,6 +2,8 @@
   <Teleport to="body">
     <div
       v-if="show"
+      ref="dialog"
+      tabindex="-1"
       class="modal-overlay"
       role="dialog"
       aria-modal="true"
@@ -42,44 +44,27 @@
           Арт-практики могут быть поддержкой, но не заменяют экстренную или профессиональную помощь.
         </p>
 
-        <button ref="closeButton" @click="close" class="close-btn btn-primary btn-block">
-          Закрыть окно
-        </button>
+        <button @click="close" class="close-btn btn-primary btn-block">Закрыть окно</button>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import Icon from '@/components/Icon.vue';
+import { useFocusScope } from '@/composables/useFocusScope';
 
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits(['close']);
-const closeButton = ref<HTMLButtonElement | null>(null);
-let previousFocus: HTMLElement | null = null;
-
+const dialog = ref<HTMLElement | null>(null);
 const close = () => emit('close');
-const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && props.show) close();
-};
-
-watch(
-  () => props.show,
-  async (show) => {
-    if (show) {
-      previousFocus = document.activeElement as HTMLElement | null;
-      document.addEventListener('keydown', onKeydown);
-      await nextTick();
-      closeButton.value?.focus();
-    } else {
-      document.removeEventListener('keydown', onKeydown);
-      previousFocus?.focus();
-    }
-  },
+useFocusScope(
+  computed(() => props.show),
+  dialog,
+  close,
+  () => [...document.querySelectorAll<HTMLElement>('#app')],
 );
-
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
 </script>
 
 <style scoped>
@@ -93,9 +78,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: var(--z-modal);
   padding: var(--space-5);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-content {

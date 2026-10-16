@@ -13,6 +13,7 @@ import {
 import { JWT_SECRET } from '../config/secrets';
 import { AIService } from '../services/aiService';
 import { createLogger } from '../config/logger';
+import { recordAudit } from '../services/auditService';
 import { AI_DATA_PROCESSING_MODE, AI_ENABLED, AI_REQUIRES_CONSENT } from '../config/ai';
 import { removeStoredImage } from '../services/imageStorageService';
 
@@ -47,20 +48,43 @@ const setSessionCookie = (
   res.cookie('ty_session', token, sessionCookieOptions);
 };
 
+/**
+ * Canonicalises an address so `User@Example.com`, ` user@example.com ` and
+ * `USER@EXAMPLE.COM` are one account.
+ *
+ * Without this the login form and the database disagree about identity: a user
+ * who types their address with different casing or surrounding whitespace is
+ * told their password is wrong, while the register endpoint happily creates a
+ * second account for the same person — which for a mental-health product means
+ * fragmented history and, worse, two accounts holding the same person's diary.
+ */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** Best-effort client IP for the audit trail; never trust it for authorisation. */
+const auditIp = (req: AuthRequest): string | undefined => req.ip ?? undefined;
+
 export const register = async (req: AuthRequest, res: Response) => {
   const validation = registerSchema.safeParse(req.body);
   if (!validation.success) {
     return res.status(400).json({ error: validation.error.format() });
   }
 
-  const { email, password, name } = validation.data;
+  const email = normalizeEmail(validation.data.email);
+  const { password, name } = validation.data;
 
   try {
     const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) return res.status(400).json({ error: 'User already exists' });
+    if (existingUser) {
+      // Do not confirm that an address is registered: that turns this endpoint
+      // into an account-enumeration oracle for anyone with a valid form.
+      recordAudit({ action: 'auth.register', outcome: 'denied', ip: auditIp(req) });
+      return res.status(400).json({ error: 'Не удалось зарегистрироваться с этими данными' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         email,
         password: hashedPassword,
@@ -71,6 +95,12 @@ export const register = async (req: AuthRequest, res: Response) => {
       include: { profile: true },
     });
 
+    recordAudit({
+      action: 'auth.register',
+      actorId: created.id,
+      outcome: 'success',
+      ip: auditIp(req),
+    });
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
     log.error({ err: error }, 'Registration error');
@@ -83,15 +113,20 @@ export const login = async (req: AuthRequest, res: Response) => {
   const validation = loginSchema.safeParse(req.body);
   if (!validation.success) return res.status(400).json({ error: validation.error.format() });
 
-  const { email, password } = validation.data;
+  const email = normalizeEmail(validation.data.email);
+  const { password } = validation.data;
 
   try {
     const user = await prisma.user.findUnique({ where: { email }, include: { profile: true } });
     if (!user || !(await bcrypt.compare(password, user.password))) {
+      // Recorded without the address: a failed-login log full of candidate
+      // emails is a ready-made list for someone who gains log access.
+      recordAudit({ action: 'auth.login_failed', outcome: 'failure', ip: auditIp(req) });
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     setSessionCookie(res, user);
+    recordAudit({ action: 'auth.login', actorId: user.id, outcome: 'success', ip: auditIp(req) });
     res.json({
       user: {
         id: user.id,
@@ -319,10 +354,19 @@ export const updateAIConsent = async (req: AuthRequest, res: Response) => {
   if (typeof req.body?.consent !== 'boolean') {
     return res.status(400).json({ error: 'consent must be a boolean' });
   }
+  const granted = req.body.consent;
   const profile = await prisma.profile.update({
     where: { userId: req.user.id },
-    data: { aiDataConsentAt: req.body.consent ? new Date() : null },
+    data: { aiDataConsentAt: granted ? new Date() : null },
     select: { aiDataConsentAt: true },
+  });
+  recordAudit({
+    action: granted ? 'consent.ai_granted' : 'consent.ai_revoked',
+    actorId: req.user.id,
+    outcome: 'success',
+    requestId: req.id,
+    ip: auditIp(req),
+    meta: { processingMode: AI_DATA_PROCESSING_MODE },
   });
   res.json({ consentGiven: Boolean(profile.aiDataConsentAt) });
 };
@@ -338,6 +382,12 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     select: { password: true },
   });
   if (!user || !(await bcrypt.compare(validation.data.currentPassword, user.password))) {
+    recordAudit({
+      action: 'auth.password_changed',
+      actorId: req.user.id,
+      outcome: 'failure',
+      ip: auditIp(req),
+    });
     return res.status(400).json({ error: 'Текущий пароль указан неверно' });
   }
   if (await bcrypt.compare(validation.data.newPassword, user.password)) {
@@ -352,6 +402,14 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     select: { id: true, email: true, role: true, sessionVersion: true },
   });
   setSessionCookie(res, updatedUser);
+  recordAudit({
+    action: 'auth.password_changed',
+    actorId: req.user.id,
+    outcome: 'success',
+    requestId: req.id,
+    ip: auditIp(req),
+    meta: { otherSessionsRevoked: true },
+  });
   res.json({ message: 'Пароль обновлён' });
 };
 
@@ -360,6 +418,13 @@ export const logoutAll = async (req: AuthRequest, res: Response) => {
   await prisma.user.update({
     where: { id: req.user.id },
     data: { sessionVersion: { increment: 1 } },
+  });
+  recordAudit({
+    action: 'auth.logout_all',
+    actorId: req.user.id,
+    outcome: 'success',
+    requestId: req.id,
+    ip: auditIp(req),
   });
   res.clearCookie('ty_session', { ...sessionCookieOptions, maxAge: undefined });
   res.status(204).end();
@@ -379,12 +444,23 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
   if (!user || !(await bcrypt.compare(validation.data.password, user.password))) {
     return res.status(400).json({ error: 'Текущий пароль указан неверно' });
   }
+  const imagesRemoved = user.imageAnalyses.filter((image) => image.imageStorageKey).length;
   await prisma.user.delete({ where: { id: req.user.id } });
   await Promise.all(
     user.imageAnalyses
       .flatMap((image) => (image.imageStorageKey ? [image.imageStorageKey] : []))
       .map(removeStoredImage),
   );
+  recordAudit({
+    action: 'account.deleted',
+    // The actor row is gone by now; the id is kept so the trail still ties this
+    // to the request log for the session it came from.
+    actorId: req.user.id,
+    outcome: 'success',
+    requestId: req.id,
+    ip: auditIp(req),
+    meta: { imagesRemoved },
+  });
   res.clearCookie('ty_session', { ...sessionCookieOptions, maxAge: undefined });
   res.status(204).end();
 };
@@ -408,6 +484,18 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
   });
   if (!user) return res.status(404).json({ error: 'Account not found' });
   const { password: _password, sessionVersion: _sessionVersion, ...safeData } = user;
+  recordAudit({
+    action: 'account.exported',
+    actorId: req.user.id,
+    outcome: 'success',
+    requestId: req.id,
+    ip: auditIp(req),
+    meta: {
+      diaryEntries: safeData.diaryEntries.length,
+      chatSessions: safeData.chatSessions.length,
+      imageAnalyses: safeData.imageAnalyses.length,
+    },
+  });
   res.setHeader('Content-Disposition', 'attachment; filename="clarity-account-data.json"');
   res.json({ exportedAt: new Date().toISOString(), user: safeData });
 };

@@ -17,7 +17,7 @@ Follow [SECURITY.md](SECURITY.md) instead.
 
 ## Getting started
 
-Requires **Node.js 22+**, and either Docker or a local PostgreSQL.
+Requires **Node.js 22.12+**, and either Docker or a local PostgreSQL.
 
 ```bash
 git clone https://github.com/Clarity-Point/Clarity-Art.git

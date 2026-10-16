@@ -76,4 +76,41 @@ describe('Auth API', () => {
     expect(res.body.error).toBe('Invalidated session');
     expect(prismaMock.profile.findUnique).not.toHaveBeenCalled();
   });
+  it('returns 503 rather than invalidating the session when the database is unavailable', async () => {
+    const token = jwt.sign({ id: 'user-1', sessionVersion: 0 }, process.env.JWT_SECRET!);
+    prismaMock.user.findUnique.mockRejectedValueOnce(new Error('Database unavailable'));
+    const response = await request(app)
+      .get('/api/ai/status')
+      .set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(503);
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('uses the current database role rather than the token’s stale admin role', async () => {
+    const token = jwt.sign(
+      { id: 'user-1', role: 'ADMIN', sessionVersion: 0 },
+      process.env.JWT_SECRET!,
+    );
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      role: 'USER',
+      sessionVersion: 0,
+    });
+    const response = await request(app)
+      .get('/api/admin/stats')
+      .set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(403);
+    expect(prismaMock.user.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    jwt.sign({ sessionVersion: 0 }, process.env.JWT_SECRET!),
+    jwt.sign({ id: 'user-1', sessionVersion: 0 }, process.env.JWT_SECRET!, { algorithm: 'HS512' }),
+  ])('rejects unsupported tokens before querying the database', async (token) => {
+    const response = await request(app)
+      .get('/api/ai/status')
+      .set('Authorization', `Bearer ${token}`);
+    expect(response.status).toBe(401);
+    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+  });
 });

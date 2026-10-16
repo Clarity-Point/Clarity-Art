@@ -40,7 +40,7 @@ watch(
 
   <!-- App shell: persistent sidebar + header + content -->
   <div v-else id="app-shell">
-    <GlobalHeader @toggle-sidebar="toggleSidebar" />
+    <GlobalHeader :drawer-open="isDrawerOpen" @toggle-sidebar="toggleSidebar" />
     <SidebarMenu :is-open="isDrawerOpen" @close="closeSidebar" />
 
     <div class="app-body">
@@ -83,7 +83,7 @@ main:focus {
   position: fixed;
   left: var(--space-3);
   top: -80px;
-  z-index: 4000;
+  z-index: var(--z-skip-link);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--primary-color);
@@ -99,7 +99,7 @@ main:focus {
   position: fixed;
   inset: 0;
   background: var(--overlay-bg);
-  z-index: 1001;
+  z-index: var(--z-scrim);
 }
 .fade-enter-active,
 .fade-leave-active {

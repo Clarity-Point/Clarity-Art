@@ -7,11 +7,7 @@ server {
     server_name localhost;
     server_tokens off;
 
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'" always;
+    include /etc/nginx/security-headers.conf;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -28,7 +24,7 @@ server {
     # backend is not yet up, rather than crash-looping the whole stack.
     resolver 127.0.0.11 ipv6=off valid=10s;
 
-    location /api/ {
+    location ^~ /api/ {
         set $backend "${BACKEND_URL}";
         proxy_pass $backend$request_uri;
 
@@ -46,17 +42,28 @@ server {
     # Vue Router uses history mode — unknown paths must fall back to index.html
     # so that deep links and page refreshes resolve instead of returning 404.
     location / {
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 
-    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ogg)$ {
-        expires 30d;
+    # Vite content hashes make only build assets safe to cache as immutable.
+    location /assets/ {
+        include /etc/nginx/security-headers.conf;
+        expires 1y;
         add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
         try_files $uri =404;
     }
 
     # The service worker must never be cached, or clients pin an old build.
     location = /sw.js {
+        include /etc/nginx/security-headers.conf;
         add_header Cache-Control "no-cache";
         try_files $uri =404;
     }

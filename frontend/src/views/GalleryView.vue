@@ -51,7 +51,14 @@
             <button
               @click="like(item.id)"
               class="like-btn"
-              :aria-label="`Поддержать работу (сейчас ${item.likes || 0})`"
+              :class="{ liked: item.liked, pending: pendingLikes.has(item.id) }"
+              :disabled="pendingLikes.has(item.id)"
+              :aria-pressed="item.liked ? 'true' : 'false'"
+              :aria-label="
+                item.liked
+                  ? `Вы уже поддержали эту работу (сейчас ${item.likes || 0})`
+                  : `Поддержать работу (сейчас ${item.likes || 0})`
+              "
             >
               <Icon name="heart" :size="16" />
               {{ item.likes || 0 }}
@@ -73,6 +80,7 @@ import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import VueMarkdown from 'vue-markdown-render';
 import Icon from '@/components/Icon.vue';
+import { useToastStore } from '@/stores/toastStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -83,12 +91,15 @@ interface GalleryItem {
   prompt: string;
   result: string;
   likes: number;
+  liked?: boolean;
   imageUrl?: string;
 }
 
 const galleryItems = ref<GalleryItem[]>([]);
 const isLoading = ref(true);
 const errorMessage = ref('');
+const pendingLikes = ref<Set<string>>(new Set());
+const toastStore = useToastStore();
 
 const fetchGallery = async () => {
   try {
@@ -109,12 +120,25 @@ onMounted(async () => {
 });
 
 const like = async (id: string) => {
+  // Guard against double submission: rapid taps previously fired several POSTs
+  // for the same work, and a failure was invisible because only the console
+  // knew about it — the heart simply never changed.
+  if (pendingLikes.value.has(id)) return;
+  pendingLikes.value = new Set(pendingLikes.value).add(id);
   try {
     const response = await axios.post(`${API_URL}/gallery/like/${id}`);
     const item = galleryItems.value.find((i) => i.id === id);
-    if (item) item.likes = response.data.likes;
+    if (item) {
+      item.likes = response.data.likes;
+      item.liked = true;
+    }
   } catch (error) {
     console.error('Failed to like post:', error);
+    toastStore.error('Не удалось поставить отметку «нравится». Попробуйте ещё раз.');
+  } finally {
+    const next = new Set(pendingLikes.value);
+    next.delete(id);
+    pendingLikes.value = next;
   }
 };
 
@@ -246,5 +270,15 @@ const previewOf = (result: string) => {
 .like-btn:hover {
   background: color-mix(in srgb, var(--danger-color) 16%, var(--danger-bg));
   border-color: color-mix(in srgb, var(--danger-color) 40%, transparent);
+}
+
+.like-btn.liked {
+  background: var(--danger-color);
+  color: #fff;
+}
+
+.like-btn.pending {
+  opacity: 0.6;
+  cursor: progress;
 }
 </style>

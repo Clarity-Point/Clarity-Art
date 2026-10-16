@@ -24,8 +24,11 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'ADMIN');
   const profileStore = useUserProfileStore();
   let restorePromise: Promise<boolean> | null = null;
+  let logoutPromise: Promise<boolean> | null = null;
+  const sessionRevision = ref(0);
 
   function applyProfile(profile: Record<string, unknown>) {
+    if (typeof profile?.id !== 'string' || !profile.id) throw new Error('Invalid session profile');
     user.value = {
       id: typeof profile.id === 'string' ? profile.id : undefined,
       email: typeof profile.email === 'string' ? profile.email : undefined,
@@ -41,8 +44,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string) {
+    expireSession();
+    const revision = sessionRevision.value;
     try {
       await axios.post(`${API_URL}/login`, { email, password });
+      if (revision !== sessionRevision.value) return false;
       // GET /profile is the canonical, complete shape. Hydrating from the small
       // login response left history, points and progress empty until a reload.
       return await restoreSession();
@@ -53,8 +59,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function register(email: string, password: string, name: string) {
+    const revision = sessionRevision.value;
     try {
       await axios.post(`${API_URL}/register`, { email, password, name });
+      if (revision !== sessionRevision.value) return false;
       return await login(email, password);
     } catch (error) {
       console.error('Registration failed:', error);
@@ -62,31 +70,46 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout() {
-    try {
-      await axios.post(`${API_URL}/logout`);
-    } catch (error) {
-      console.error('Logout request failed:', error);
-    } finally {
-      user.value = null;
-      profileStore.resetProfile();
-      useAnalyticsStore().clearUserAnalytics();
-    }
+  function logout(): Promise<boolean> {
+    if (logoutPromise) return logoutPromise;
+    const revision = ++sessionRevision.value;
+    restorePromise = null;
+    logoutPromise = (async () => {
+      try {
+        await axios.post(`${API_URL}/logout`);
+        if (revision !== sessionRevision.value) return false;
+        expireSession();
+        return true;
+      } catch {
+        // The browser may still hold a valid HttpOnly cookie. Let the user
+        // retry instead of presenting a local-only logout as a server logout.
+        return false;
+      } finally {
+        logoutPromise = null;
+      }
+    })();
+    return logoutPromise;
   }
 
-  async function restoreSession() {
+  function restoreSession(): Promise<boolean> {
+    if (logoutPromise) return Promise.resolve(false);
     if (restorePromise) return restorePromise;
+    const revision = sessionRevision.value;
     restorePromise = (async () => {
       try {
         const response = await axios.get(`${API_URL}/profile`);
+        if (revision !== sessionRevision.value) return false;
         applyProfile(response.data);
         return true;
-      } catch {
-        user.value = null;
-        profileStore.resetProfile();
+      } catch (error) {
+        if (revision !== sessionRevision.value) return false;
+        if (axios.isAxiosError(error) && error.response?.status === 401) expireSession();
+        // A temporary server/network failure does not invalidate a previously
+        // verified session or erase unsaved in-memory work.
         return false;
       } finally {
-        restorePromise = null;
+        // A stale request must not clear a newer request's deduplication lock.
+        if (revision === sessionRevision.value) restorePromise = null;
       }
     })();
     return restorePromise;
@@ -97,6 +120,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function expireSession() {
+    sessionRevision.value++;
+    restorePromise = null;
     user.value = null;
     profileStore.resetProfile();
     useAnalyticsStore().clearUserAnalytics();
@@ -104,6 +129,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
+    sessionRevision: computed(() => sessionRevision.value),
     isAuthenticated,
     isAdmin,
     login,

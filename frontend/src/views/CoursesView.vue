@@ -90,10 +90,10 @@ import { useUserProfileStore } from '@/stores/userProfileStore';
 import { storeToRefs } from 'pinia';
 import Icon from '@/components/Icon.vue';
 
-import coverAdult from '@/assets/art-teropiya-dlya-samopoznaniya.jpeg';
-import coverDifficultExperience from '@/assets/art-practice-difficult-experience.jpeg';
-import coverChild from '@/assets/dlya-detei.jpeg';
-import coverGeneral from '@/assets/vvedenie-v-art.jpeg';
+import coverAdult from '@/assets/images/art-teropiya-dlya-samopoznaniya.jpeg';
+import coverDifficultExperience from '@/assets/images/art-practice-difficult-experience.jpeg';
+import coverChild from '@/assets/images/dlya-detei.jpeg';
+import coverGeneral from '@/assets/images/vvedenie-v-art.jpeg';
 
 const coversByCategory: Record<string, string> = {
   adult: coverAdult,

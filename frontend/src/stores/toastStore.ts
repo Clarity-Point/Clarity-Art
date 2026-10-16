@@ -16,7 +16,7 @@ export const useToastStore = defineStore('toasts', () => {
   function show(text: string, tone: ToastTone = 'info', duration = 4500) {
     const id = ++nextId;
     messages.value.push({ id, text, tone });
-    window.setTimeout(() => dismiss(id), duration);
+    if (duration > 0) window.setTimeout(() => dismiss(id), duration);
     return id;
   }
 
@@ -25,7 +25,7 @@ export const useToastStore = defineStore('toasts', () => {
   }
 
   const success = (text: string) => show(text, 'success');
-  const error = (text: string) => show(text, 'error', 6500);
+  const error = (text: string) => show(text, 'error', 0);
   const info = (text: string) => show(text, 'info');
 
   return { messages, show, success, error, info, dismiss };

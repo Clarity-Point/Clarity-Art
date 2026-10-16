@@ -10,7 +10,9 @@
         </button>
       </div>
 
-      <div v-if="sessions.length === 0" class="sessions-empty muted">
+      <div v-if="isLoadingSessions" class="sessions-empty muted">Загружаем историю бесед…</div>
+
+      <div v-else-if="sessions.length === 0" class="sessions-empty muted">
         Пока нет сохранённых бесед — начните разговор, и он появится здесь.
       </div>
 
@@ -35,7 +37,14 @@
     <!-- Conversation -->
     <section class="chat-pane">
       <div class="messages" ref="messagesRef">
-        <div v-if="messages.length === 0" class="empty-state chat-empty">
+        <div v-if="isLoadingHistory" class="empty-state chat-empty">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>Загружаем беседу…</p>
+        </div>
+
+        <p v-if="historyError" class="chat-error" role="alert">{{ historyError }}</p>
+
+        <div v-else-if="messages.length === 0" class="empty-state chat-empty">
           <span class="empty-icon"><Icon name="leaf" :size="28" /></span>
           <p>Расскажите, что вас беспокоит…</p>
           <p class="chat-empty-hint muted">
@@ -111,6 +120,9 @@ const {
   currentSessionId,
   showEmergency,
   isStreaming,
+  isLoadingSessions,
+  isLoadingHistory,
+  historyError,
   formatSessionDate,
   formatMessageTime,
   fetchSessions,
@@ -372,8 +384,21 @@ onMounted(async () => {
   border-radius: 0;
 }
 
-.input-area input:focus {
+/*
+ * The composer sits inside a bordered container, so the field itself has no
+ * border to tint. Moving the ring to the wrapper via :focus-within keeps a
+ * visible keyboard indicator while matching the surrounding chrome — clearing
+ * box-shadow here without this left the input with no focus affordance at all.
+ */
+.input-area:focus-within {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.input-area input:focus,
+.input-area input:focus-visible {
   box-shadow: none;
+  outline: none;
 }
 
 .send-btn {

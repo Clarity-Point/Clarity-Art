@@ -2,6 +2,10 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { galleryVisibilitySchema, healthMetricSchema } from '../schemas';
+import { createLogger } from '../config/logger';
+import { recordAudit } from '../services/auditService';
+
+const log = createLogger('socialController');
 
 export const getPublicGallery = async (req: AuthRequest, res: Response) => {
   try {
@@ -40,6 +44,16 @@ export const togglePublic = async (req: AuthRequest, res: Response) => {
       data: { isPublic },
     });
     if (count === 0) return res.status(404).json({ error: 'Image not found' });
+    // Publishing a drawing makes it readable by every authenticated user in the
+    // deployment, so the transition is recorded in both directions.
+    recordAudit({
+      action: isPublic ? 'privacy.image_published' : 'privacy.image_unpublished',
+      actorId: req.user.id,
+      subjectId: id,
+      outcome: 'success',
+      requestId: req.id,
+      ip: req.ip,
+    });
     res.json({ message: `Image visibility updated to ${isPublic}` });
   } catch {
     res.status(500).json({ error: 'Error updating visibility' });
@@ -77,7 +91,7 @@ export const likePost = async (req: AuthRequest, res: Response) => {
       throw error;
     }
   } catch (error) {
-    console.error('Error liking post:', error);
+    log.error({ err: error, imageId: id }, 'likePost failed');
     res.status(500).json({ error: 'Error liking post' });
   }
 };

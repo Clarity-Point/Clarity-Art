@@ -1,5 +1,12 @@
 <template>
-  <aside :class="['sidebar', { 'is-open': isOpen }]" aria-label="Основная навигация">
+  <aside
+    id="primary-navigation"
+    ref="drawer"
+    :inert="!isDesktop && !isOpen"
+    tabindex="-1"
+    :class="['sidebar', { 'is-open': isOpen }]"
+    aria-label="Основная навигация"
+  >
     <nav class="sb-nav">
       <template v-if="isAuthenticated">
         <p class="sb-label">Основное</p>
@@ -104,7 +111,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
+import { useFocusScope } from '@/composables/useFocusScope';
 import { RouterLink } from 'vue-router';
 import { useAuthStore } from '@/stores/authStore';
 import { storeToRefs } from 'pinia';
@@ -119,8 +127,23 @@ const isOrgAdmin = computed(() => user.value?.role === 'ORG_ADMIN');
 
 const showEmergency = ref(false);
 
-defineProps<{ isOpen: boolean }>();
-defineEmits(['close']);
+const props = defineProps<{ isOpen: boolean }>();
+const emit = defineEmits(['close']);
+const drawer = ref<HTMLElement | null>(null);
+const desktopQuery = window.matchMedia('(min-width: 1024px)');
+const isDesktop = ref(desktopQuery.matches);
+const syncViewport = () => {
+  isDesktop.value = desktopQuery.matches;
+  emit('close');
+};
+onMounted(() => desktopQuery.addEventListener('change', syncViewport));
+onBeforeUnmount(() => desktopQuery.removeEventListener('change', syncViewport));
+useFocusScope(
+  computed(() => props.isOpen && !isDesktop.value),
+  drawer,
+  () => emit('close'),
+  () => [...document.querySelectorAll<HTMLElement>('.ui-header, .app-body, .skip-link')],
+);
 
 const mainNav = [
   { to: '/', icon: 'home', name: 'Главная', desc: 'Обзор и быстрый старт', exact: true },
@@ -162,14 +185,18 @@ const manageNav = computed(() => {
 
 <style scoped>
 .sidebar {
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
   position: fixed;
   top: var(--header-h);
   left: 0;
   width: var(--sidebar-w);
-  height: calc(100vh - var(--header-h));
+  height: calc(100dvh - var(--header-h));
+  max-width: calc(100vw - 24px);
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  z-index: 1002;
+  z-index: var(--z-sidebar);
   /* Off-canvas by default (mobile); slid in on desktop below. */
   transform: translateX(-100%);
   transition: transform var(--transition);

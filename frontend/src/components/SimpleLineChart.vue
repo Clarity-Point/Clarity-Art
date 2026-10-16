@@ -1,5 +1,5 @@
 <template>
-  <div class="simple-chart" role="img" :aria-label="ariaLabel">
+  <div class="simple-chart" tabindex="0" role="img" :aria-label="ariaLabel">
     <svg viewBox="0 0 800 300" preserveAspectRatio="none" :style="{ height: `${height}px` }">
       <line v-for="tick in gridTicks" :key="tick.y" x1="54" x2="784" :y1="tick.y" :y2="tick.y" />
       <text
@@ -44,7 +44,7 @@ interface Point {
 
 const props = withDefaults(
   defineProps<{
-    points: Point[];
+    points?: Point[];
     minY?: number;
     maxY?: number;
     height?: number;
@@ -52,6 +52,10 @@ const props = withDefaults(
     valueFormatter?: (value: number) => string;
   }>(),
   {
+    // Defaulted like every other prop: without it the bounds computed below
+    // throws on the first render of a chart that is shown before its data
+    // arrives, taking the whole view down with it.
+    points: () => [],
     minY: 0,
     maxY: undefined,
     height: 300,

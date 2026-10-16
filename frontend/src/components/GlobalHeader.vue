@@ -1,7 +1,13 @@
 <template>
   <header class="ui-header">
     <div class="header-inner-content">
-      <button @click="toggleSidebar" class="icon-btn menu-btn" aria-label="Открыть меню">
+      <button
+        @click="toggleSidebar"
+        class="icon-btn menu-btn"
+        :aria-label="drawerOpen ? 'Закрыть меню' : 'Открыть меню'"
+        :aria-expanded="drawerOpen"
+        aria-controls="primary-navigation"
+      >
         <Icon name="menu" :size="22" />
       </button>
 
@@ -20,12 +26,18 @@
         </button>
 
         <div v-if="isAuthenticated" class="menu-wrapper" ref="notiRef">
-          <button @click="toggleNoti" class="icon-btn noti-btn" aria-label="Уведомления">
+          <button
+            @click="toggleNoti"
+            class="icon-btn noti-btn"
+            aria-label="Уведомления"
+            :aria-expanded="showNotifications"
+            aria-controls="notifications-panel"
+          >
             <Icon name="bell" :size="20" />
             <span v-if="unreadCount > 0" class="noti-dot">{{ unreadCount }}</span>
           </button>
           <transition name="pop">
-            <div v-if="showNotifications" class="dropdown noti-dropdown">
+            <div v-if="showNotifications" id="notifications-panel" class="dropdown noti-dropdown">
               <div class="dropdown-head">Уведомления</div>
               <div v-if="notifications.length === 0" class="dropdown-empty">
                 <Icon name="bell" :size="24" />
@@ -46,13 +58,19 @@
         </div>
 
         <div v-if="isAuthenticated" class="menu-wrapper" ref="userRef">
-          <button @click="toggleUser" class="user-trigger">
+          <button
+            @click="toggleUser"
+            class="user-trigger"
+            :aria-expanded="showUser"
+            aria-controls="user-panel"
+            aria-label="Меню профиля"
+          >
             <span class="avatar">{{ initials }}</span>
             <span class="user-name">{{ profile.name || 'Профиль' }}</span>
             <Icon name="chevron-down" :size="16" class="faint" />
           </button>
           <transition name="pop">
-            <div v-if="showUser" class="dropdown user-dropdown">
+            <div v-if="showUser" id="user-panel" class="dropdown user-dropdown">
               <div class="user-card">
                 <span class="avatar avatar-lg">{{ initials }}</span>
                 <div>
@@ -95,7 +113,9 @@ import { storeToRefs } from 'pinia';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
+import { useToastStore } from '@/stores/toastStore';
 
+defineProps<{ drawerOpen: boolean }>();
 const router = useRouter();
 const authStore = useAuthStore();
 const profileStore = useUserProfileStore();
@@ -146,6 +166,14 @@ const onClickOutside = (e: MouseEvent) => {
   if (userRef.value && !userRef.value.contains(e.target as Node)) showUser.value = false;
 };
 
+const onEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return;
+  const wrapper = showNotifications.value ? notiRef.value : showUser.value ? userRef.value : null;
+  showNotifications.value = false;
+  showUser.value = false;
+  wrapper?.querySelector('button')?.focus();
+};
+
 const fetchNotifications = async () => {
   if (!isAuthenticated.value) return;
   try {
@@ -191,18 +219,24 @@ onMounted(() => {
   fetchNotifications();
   pollId = window.setInterval(fetchNotifications, 60000);
   document.addEventListener('click', onClickOutside);
+  document.addEventListener('keydown', onEscape);
 });
 
 onBeforeUnmount(() => {
   if (pollId) clearInterval(pollId);
   document.removeEventListener('click', onClickOutside);
+  document.removeEventListener('keydown', onEscape);
 });
 
 const emit = defineEmits(['toggle-sidebar']);
 const goToHome = () => router.push('/');
 const toggleSidebar = () => emit('toggle-sidebar');
 const handleLogout = async () => {
-  await authStore.logout();
+  const loggedOut = await authStore.logout();
+  if (!loggedOut) {
+    useToastStore().error('Не удалось выйти. Проверьте соединение и повторите попытку.');
+    return;
+  }
   showUser.value = false;
   await router.replace('/login');
 };
@@ -214,7 +248,7 @@ const handleLogout = async () => {
   top: 0;
   left: 0;
   width: 100%;
-  z-index: 1000;
+  z-index: var(--z-header);
 }
 
 .header-inner-content {
@@ -283,7 +317,7 @@ const handleLogout = async () => {
   height: 16px;
   padding: 0 4px;
   background: var(--accent-color);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.6rem;
   font-weight: 700;
   border-radius: var(--radius-full);
@@ -348,7 +382,7 @@ const handleLogout = async () => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
-  z-index: 1001;
+  z-index: var(--z-header-dropdown);
   overflow: hidden;
 }
 
@@ -496,6 +530,29 @@ const handleLogout = async () => {
   }
   .user-name {
     display: none;
+  }
+}
+</style>
+
+<style scoped>
+@media (max-width: 480px) {
+  .mark-text {
+    display: none;
+  }
+  .header-inner-content {
+    gap: var(--space-1);
+  }
+  .header-right {
+    gap: var(--space-1);
+  }
+  .noti-dropdown,
+  .user-dropdown {
+    position: fixed;
+    top: calc(var(--header-h) + var(--space-2));
+    right: var(--space-3);
+    width: min(320px, calc(100vw - var(--space-5)));
+    max-height: calc(100dvh - var(--header-h) - var(--space-5));
+    overflow-y: auto;
   }
 }
 </style>

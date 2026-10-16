@@ -83,7 +83,7 @@ docker compose down             # остановить (добавьте -v, ч�
 
 ## Быстрый старт — из исходников
 
-Нужны **Node.js 22+** и **Docker** (для PostgreSQL).
+Нужны **Node.js 22.12+** и **Docker** (для PostgreSQL).
 
 Dev-стек собирается из вашего чекаута и делает hot reload для обоих сервисов:
 
@@ -216,3 +216,11 @@ HTTPS-развёртывания также задайте `COOKIE_SECURE=true`,
 ## Лицензия
 
 [Apache-2.0](LICENSE)
+
+## Навигация по проекту
+
+[Документация](docs/README.md) · [Карта проекта](docs/architecture/project-map.md) ·
+[Эксплуатация](docs/operations/runbook.md) · [Аудит](docs/audits/2026-10-16.md).
+
+Полная локальная проверка: `npm run check`. Браузерные проверки интерфейса:
+`npm run test:browser` (предварительно `npx playwright install chromium`).

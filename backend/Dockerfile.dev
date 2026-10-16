@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
-# Development image: source is bind-mounted by docker-compose.dev.yml and nodemon
-# restarts on change, so the image itself only has to provide the toolchain.
+# Development image: source is bind-mounted by docker-compose.dev.yml and
+# `node --watch` restarts on change, so the image itself only has to provide the
+# toolchain.
 
 ARG NODE_VERSION=22-alpine
 FROM node:${NODE_VERSION}

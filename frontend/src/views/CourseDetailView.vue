@@ -144,10 +144,10 @@ import { useUserProfileStore } from '@/stores/userProfileStore';
 import { storeToRefs } from 'pinia';
 import Icon from '@/components/Icon.vue';
 
-import coverAdult from '@/assets/art-teropiya-dlya-samopoznaniya.jpeg';
-import coverDifficultExperience from '@/assets/art-practice-difficult-experience.jpeg';
-import coverChild from '@/assets/dlya-detei.jpeg';
-import coverGeneral from '@/assets/vvedenie-v-art.jpeg';
+import coverAdult from '@/assets/images/art-teropiya-dlya-samopoznaniya.jpeg';
+import coverDifficultExperience from '@/assets/images/art-practice-difficult-experience.jpeg';
+import coverChild from '@/assets/images/dlya-detei.jpeg';
+import coverGeneral from '@/assets/images/vvedenie-v-art.jpeg';
 
 const coversByCategory: Record<string, string> = {
   adult: coverAdult,
@@ -166,11 +166,22 @@ const { profile } = storeToRefs(userProfileStore);
 const courseId = computed(() => route.params.courseId as string);
 const progressError = ref('');
 
-onMounted(async () => {
+const loadCourse = async () => {
+  progressError.value = '';
   if (courseId.value) {
     await coursesStore.fetchCourseById(courseId.value);
   }
-});
+};
+
+onMounted(loadCourse);
+
+/*
+ * Vue Router reuses the same component instance when only the params change, so
+ * navigating /courses/a → /courses/b would otherwise keep course A's title,
+ * modules and progress on screen under course B's URL. Reloading on param
+ * change is what makes a direct link between two courses behave correctly.
+ */
+watch(courseId, loadCourse);
 
 const isLessonCompleted = (lessonId: string) => {
   if (!course.value) return false;
@@ -197,7 +208,13 @@ const toggleLesson = async (lessonId: string) => {
 const updateProgress = async (completedLessons: string[]) => {
   if (!course.value) return false;
 
-  const totalLessons = course.value.modules.reduce((acc, mod) => acc + mod.lessons.length, 0);
+  // `modules` is optional on the API response shape and `lessons` on a module
+  // can be absent for a course mid-authoring. Reading them unguarded throws
+  // inside the click handler and the view is left with a half-applied toggle.
+  const totalLessons = (course.value.modules ?? []).reduce(
+    (acc, mod) => acc + (mod.lessons?.length ?? 0),
+    0,
+  );
   const totalHomeworks = course.value.relatedHomework?.length || 0;
 
   const submittedHwCount =
@@ -273,6 +290,8 @@ watch(
 
 <style scoped>
 .course-detail-view {
+  min-width: 0;
+  width: 100%;
   padding-bottom: var(--space-8);
 }
 .course-error {
@@ -313,7 +332,7 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  color: var(--on-primary);
+  color: var(--on-image);
   font-size: var(--text-sm);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.28);
@@ -325,11 +344,11 @@ watch(
 }
 .hero-back:hover {
   background: rgba(0, 0, 0, 0.42);
-  color: var(--on-primary);
+  color: var(--on-image);
 }
 
 .hero-title {
-  color: var(--on-primary);
+  color: var(--on-image);
   font-size: var(--text-3xl);
   margin-bottom: var(--space-4);
   max-width: 720px;
@@ -342,7 +361,7 @@ watch(
   background: rgba(255, 255, 255, 0.25);
 }
 .hero-progress .progress > span {
-  background: var(--on-primary);
+  background: var(--on-image);
 }
 .hero-progress-label {
   display: block;
@@ -355,14 +374,14 @@ watch(
 /* Body grid */
 .course-body-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: var(--space-6);
   align-items: start;
 }
 
 @media (max-width: 900px) {
   .course-body-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .course-side {
     order: -1;
@@ -530,5 +549,19 @@ watch(
   margin: 0;
   font-size: var(--text-sm);
   line-height: 1.5;
+}
+</style>
+
+<style scoped>
+.course-main,
+.course-side {
+  min-width: 0;
+}
+.hw-card {
+  flex-wrap: wrap;
+}
+.hw-body .chip {
+  max-width: 100%;
+  white-space: normal;
 }
 </style>

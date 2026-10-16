@@ -29,6 +29,9 @@ export function useDiaryEntries() {
   const startEdit = (entry: DiaryEntry) => {
     editingEntryId.value = entry.id;
     currentEditText.value = entry.text;
+    // A banner describing a previous failed save must not stay on screen while
+    // the user is typing the retry.
+    entryError.value = '';
   };
 
   const saveEdit = async () => {
@@ -41,6 +44,7 @@ export function useDiaryEntries() {
         return;
       }
     }
+    entryError.value = '';
     cancelEdit(); // Reset editing state
   };
 
@@ -50,16 +54,18 @@ export function useDiaryEntries() {
   };
 
   const requestDeleteEntry = async (entryId: string) => {
-    if (window.confirm('Вы уверены, что хотите удалить эту запись? Это действие необратимо.')) {
-      const deleted = await userProfileStore.deleteDiaryEntry(entryId);
-      if (!deleted) {
-        entryError.value = 'Не удалось удалить запись. Попробуйте ещё раз.';
-        return;
-      }
-      if (editingEntryId.value === entryId) {
-        // If deleting the entry currently being edited
-        cancelEdit();
-      }
+    if (!window.confirm('Вы уверены, что хотите удалить эту запись? Это действие необратимо.')) {
+      return;
+    }
+    entryError.value = '';
+    const deleted = await userProfileStore.deleteDiaryEntry(entryId);
+    if (!deleted) {
+      entryError.value = 'Не удалось удалить запись. Попробуйте ещё раз.';
+      return;
+    }
+    if (editingEntryId.value === entryId) {
+      // If deleting the entry currently being edited
+      cancelEdit();
     }
   };
   // --- End Editing State & Logic ---

@@ -35,6 +35,11 @@ export function useProfileActions() {
   const performProfileAnalysis = async () => {
     isAnalyzingProfile.value = true;
     profileAnalysisError.value = null;
+    // Clear the previous result up front. The view renders the result, the
+    // spinner and the error as independent branches, so a stale result left in
+    // place shows alongside the "generating" state and then alongside the error
+    // if the retry fails — the user cannot tell which text is current.
+    profileAnalysisResult.value = null;
     try {
       // Real, server-side analysis. The backend builds a prompt from the profile
       // and runs it through the provider-agnostic AI service (with a graceful
@@ -134,7 +139,7 @@ export function useProfileActions() {
     isManagingAccount.value = true;
     try {
       await axios.post(`${API_URL}/account/logout-all`);
-      await authStore.logout();
+      authStore.expireSession();
       window.location.assign('/login');
     } catch {
       toastStore.error('Не удалось завершить все сеансы.');

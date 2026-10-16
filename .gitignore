@@ -13,8 +13,7 @@ backend/src/generated/
 
 # Environment variables (never commit real secrets — keep .env.example only)
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 # Logs
@@ -34,8 +33,8 @@ coverage/
 .nyc_output/
 
 # Editor / OS
-.vscode/*
-!.vscode/extensions.json
+**/.vscode/*
+!**/.vscode/extensions.json
 .idea/
 *.suo
 *.ntvs*
@@ -48,3 +47,11 @@ Thumbs.db
 # Misc
 *.local
 .cache/
+
+# Private local drawings
+backend/data/
+artifacts/
+
+# Browser verification output
+playwright-report/
+test-results/

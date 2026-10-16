@@ -26,7 +26,21 @@
       </div>
     </section>
 
-    <div v-if="patients.length" class="grid grid-auto">
+    <div v-if="isLoading" class="empty-state">
+      <span class="spinner" aria-hidden="true"></span>
+      <p>Загружаем список подопечных…</p>
+    </div>
+
+    <div v-else-if="loadError" class="empty-state">
+      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+      <p>{{ loadError }}</p>
+      <button class="btn-outline" @click="fetchPatients">
+        <Icon name="refresh-cw" :size="16" />
+        Повторить
+      </button>
+    </div>
+
+    <div v-else-if="patients.length" class="grid grid-auto">
       <article
         v-for="patient in patients"
         :key="patient.id"
@@ -54,7 +68,7 @@
             v-for="(trend, i) in patient.diaryEntries"
             :key="i"
             :class="['heat-cell', trend.riskLevel]"
-            :title="`${new Date(trend.date).toLocaleDateString('ru-RU')}: ${trend.tags.join(', ')}`"
+            :title="`${formatEntryDate(trend.date)}: ${(trend.tags ?? []).join(', ')}`"
           ></span>
         </div>
         <p v-else class="muted no-entries">Дневниковых записей пока нет.</p>
@@ -78,60 +92,68 @@
       <p>Пока нет подопечных, закреплённых за вами.</p>
     </div>
 
-    <div
-      v-if="selectedPatient"
-      class="patient-modal"
-      role="dialog"
-      aria-modal="true"
-      @click.self="selectedPatient = null"
-    >
-      <div class="modal-content card">
-        <button class="icon-btn close-btn" @click="selectedPatient = null" aria-label="Закрыть">
-          <Icon name="x" :size="20" />
-        </button>
-        <div class="modal-title-row">
-          <span class="avatar avatar-lg"><Icon name="user" :size="24" /></span>
-          <h2>{{ selectedPatient.profile?.name || selectedPatient.email }}</h2>
-        </div>
+    <Teleport to="body">
+      <div
+        ref="patientDialog"
+        tabindex="-1"
+        aria-labelledby="patient-title"
+        v-if="selectedPatient"
+        class="patient-modal"
+        role="dialog"
+        aria-modal="true"
+        @click.self="selectedPatient = null"
+      >
+        <div class="modal-content card">
+          <button class="icon-btn close-btn" @click="selectedPatient = null" aria-label="Закрыть">
+            <Icon name="x" :size="20" />
+          </button>
+          <div class="modal-title-row">
+            <span class="avatar avatar-lg"><Icon name="user" :size="24" /></span>
+            <h2 id="patient-title">{{ selectedPatient.profile?.name || selectedPatient.email }}</h2>
+          </div>
 
-        <section class="modal-section">
-          <div class="section-head"><h3 class="section-title">Последние записи в дневнике</h3></div>
-          <div v-if="selectedPatient.diaryEntries?.length" class="stack">
-            <div v-for="entry in selectedPatient.diaryEntries" :key="entry.id" class="entry-card">
-              <div class="entry-top">
-                <span class="faint">{{ new Date(entry.date).toLocaleDateString('ru-RU') }}</span>
-                <span :class="['chip', riskBadge(entry.riskLevel)]">{{ entry.riskLevel }}</span>
+          <section class="modal-section">
+            <div class="section-head">
+              <h3 class="section-title">Последние записи в дневнике</h3>
+            </div>
+            <div v-if="selectedPatient.diaryEntries?.length" class="stack">
+              <div v-for="entry in selectedPatient.diaryEntries" :key="entry.id" class="entry-card">
+                <div class="entry-top">
+                  <span class="faint">{{ new Date(entry.date).toLocaleDateString('ru-RU') }}</span>
+                  <span :class="['chip', riskBadge(entry.riskLevel)]">{{ entry.riskLevel }}</span>
+                </div>
+                <p>{{ entry.content }}</p>
               </div>
-              <p>{{ entry.content }}</p>
             </div>
-          </div>
-          <p v-else class="muted">Записей пока нет.</p>
-        </section>
+            <p v-else class="muted">Записей пока нет.</p>
+          </section>
 
-        <section class="modal-section">
-          <div class="section-head"><h3 class="section-title">История чатов (риски)</h3></div>
-          <div v-if="selectedPatient.chatSessions?.length" class="stack">
-            <div
-              v-for="session in selectedPatient.chatSessions"
-              :key="session.id"
-              class="session-card row-between"
-            >
-              <span class="faint">{{ new Date(session.date).toLocaleDateString('ru-RU') }}</span>
-              <span :class="['chip', riskBadge(session.riskLevel)]"
-                >Уровень риска: {{ session.riskLevel }}</span
+          <section class="modal-section">
+            <div class="section-head"><h3 class="section-title">История чатов (риски)</h3></div>
+            <div v-if="selectedPatient.chatSessions?.length" class="stack">
+              <div
+                v-for="session in selectedPatient.chatSessions"
+                :key="session.id"
+                class="session-card row-between"
               >
+                <span class="faint">{{ new Date(session.date).toLocaleDateString('ru-RU') }}</span>
+                <span :class="['chip', riskBadge(session.riskLevel)]"
+                  >Уровень риска: {{ session.riskLevel }}</span
+                >
+              </div>
             </div>
-          </div>
-          <p v-else class="muted">Чат-сессий с зафиксированным риском не найдено.</p>
-        </section>
+            <p v-else class="muted">Чат-сессий с зафиксированным риском не найдено.</p>
+          </section>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import { useFocusScope } from '@/composables/useFocusScope';
 import Icon from '@/components/Icon.vue';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -168,6 +190,17 @@ interface Patient {
 
 const patients = ref<Patient[]>([]);
 const selectedPatient = ref<Patient | null>(null);
+const patientDialog = ref<HTMLElement | null>(null);
+useFocusScope(
+  computed(() => selectedPatient.value !== null),
+  patientDialog,
+  () => {
+    selectedPatient.value = null;
+  },
+  () => [...document.querySelectorAll<HTMLElement>('#app')],
+);
+const isLoading = ref(false);
+const loadError = ref('');
 
 const urgentCount = computed(
   () => patients.value.filter((p) => (p.profile?.attentionScore || 0) > 50).length,
@@ -179,12 +212,26 @@ const riskBadge = (level: string) => {
   return 'badge-success';
 };
 
+const formatEntryDate = (value: string) => new Date(value).toLocaleDateString('ru-RU');
+
 const fetchPatients = async () => {
+  isLoading.value = true;
+  loadError.value = '';
   try {
     const response = await axios.get(`${API_URL}/therapist/patients`);
-    patients.value = response.data;
+    patients.value = Array.isArray(response.data) ? response.data : [];
   } catch (e) {
     console.error('Error fetching patients', e);
+    /*
+     * Silently keeping the empty list made a network failure indistinguishable
+     * from "you have no patients" — the single most misleading outcome on this
+     * screen, because the clinician would conclude there is nothing to follow
+     * up on. Surface the failure with a retry instead.
+     */
+    patients.value = [];
+    loadError.value = 'Не удалось загрузить список подопечных. Проверьте соединение.';
+  } finally {
+    isLoading.value = false;
   }
 };
 
@@ -331,15 +378,16 @@ onMounted(fetchPatients);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: var(--z-modal);
   padding: var(--space-5);
 }
 
 .modal-content {
   width: 100%;
   max-width: 800px;
-  max-height: 85vh;
+  max-height: calc(100dvh - var(--space-7));
   overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: var(--shadow-lg);
   position: relative;
 }

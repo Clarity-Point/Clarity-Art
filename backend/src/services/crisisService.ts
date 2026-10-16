@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AI_BASE_URL, AI_MODEL, AI_ENABLED, aiHeaders } from '../config/ai';
+import { AI_BASE_URL, AI_MODEL, AI_ENABLED, aiHeaders, AI_SCREEN_TIMEOUT_MS } from '../config/ai';
 import { createLogger } from '../config/logger';
 
 const log = createLogger('crisisService');
@@ -57,7 +57,7 @@ export const analyzeCrisisRisk = async (
         ],
         temperature: 0,
       },
-      { headers: aiHeaders() },
+      { headers: aiHeaders(), timeout: AI_SCREEN_TIMEOUT_MS },
     );
 
     const result = String(response.data?.choices?.[0]?.message?.content || '')

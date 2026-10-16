@@ -86,7 +86,7 @@ docker compose down             # stop (add -v to also drop the database)
 
 ## Quick start — from source
 
-Requires **Node.js 22+** and **Docker** (for PostgreSQL).
+Requires **Node.js 22.12+** and **Docker** (for PostgreSQL).
 
 The dev stack builds from your checkout and hot-reloads both services:
 
@@ -220,3 +220,11 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## License
 
 [Apache-2.0](LICENSE)
+
+## Project documentation
+
+[Documentation index](docs/README.md) · [Project map](docs/architecture/project-map.md) ·
+[Operations](docs/operations/runbook.md) · [Audit](docs/audits/2026-10-16.md).
+
+Run `npm run check` for local verification and `npm run test:browser` for browser
+interface checks (install Chromium first with `npx playwright install chromium`).

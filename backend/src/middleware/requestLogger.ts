@@ -20,7 +20,9 @@ const IGNORED_PATHS = new Set(['/health', '/health/ready', '/favicon.ico']);
  * capture every failing request: 5xx → error, 4xx → warn, everything else → info.
  */
 export const requestLogger = (req: Request, res: Response, next: NextFunction) => {
-  const requestId = (req.headers['x-request-id'] as string) || randomUUID();
+  const suppliedId = req.get('x-request-id');
+  const requestId =
+    suppliedId && /^[A-Za-z0-9._-]{1,128}$/.test(suppliedId) ? suppliedId : randomUUID();
   req.id = requestId;
   res.setHeader('X-Request-Id', requestId);
 

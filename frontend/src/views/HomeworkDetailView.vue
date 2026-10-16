@@ -26,7 +26,9 @@
         Опишите своими словами, что вы сделали, или оставьте ссылку на работу — здесь нет правильных
         и неправильных ответов, только ваш опыт.
       </p>
+      <label for="homework-answer">Ваш ответ</label>
       <textarea
+        id="homework-answer"
         v-model="submissionContent"
         placeholder="Введите ваш ответ или ссылку на работу..."
         rows="6"
@@ -44,6 +46,7 @@
       <p
         v-if="submissionMessage"
         class="submission-feedback"
+        role="status"
         :class="{
           'is-success': submissionMessage.includes('успешно'),
           'is-error': submissionMessage.includes('Не удалось'),
@@ -88,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { useUserProfileStore } from '@/stores/userProfileStore';
 import { useCoursesStore } from '@/stores/coursesStore';
@@ -113,10 +116,19 @@ const isSubmitting = ref(false);
 const getCourseTitle = (id: string) =>
   coursesStore.currentCourse?.id === id ? coursesStore.currentCourse.title : 'Неизвестный курс';
 
-onMounted(async () => {
+const loadHomework = async () => {
   const idFromRoute = route.params.homeworkId as string;
   if (!idFromRoute) return;
   homeworkId.value = idFromRoute;
+
+  // Reset everything the previous task left behind, otherwise moving from one
+  // assignment to another shows the old title, description and submitted text
+  // until the new fetch happens to resolve.
+  homeworkTitle.value = 'Детали Задания';
+  homeworkDescription.value = '';
+  submissionContent.value = '';
+  submissionMessage.value = '';
+  courseContextId.value = null;
 
   // Homework metadata is served as part of its parent course (relatedHomework);
   // there is no standalone homework API. CourseDetailView links here with the
@@ -151,7 +163,20 @@ onMounted(async () => {
     homeworkTitle.value = 'Задание не найдено';
     homeworkDescription.value = 'Информация о домашнем задании не найдена.';
   }
-});
+};
+
+onMounted(loadHomework);
+
+/*
+ * The router reuses this instance across param changes, so going straight from
+ * one assignment to another without leaving the view kept the old content.
+ */
+watch(
+  () => [route.params.homeworkId, route.query.courseContext],
+  () => {
+    void loadHomework();
+  },
+);
 
 const currentSubmission = computed(() => {
   if (!homeworkId.value) return null;
@@ -192,7 +217,8 @@ const submitHomework = async () => {
     const courseProgress = profile.value.courseProgress.find(
       (cp) => cp.courseId === courseContextId.value,
     );
-    const totalLessons = course?.modules.reduce((acc, mod) => acc + mod.lessons.length, 0) || 0;
+    const totalLessons =
+      (course?.modules ?? []).reduce((acc, mod) => acc + (mod.lessons?.length ?? 0), 0) || 0;
     const homeworksForCourse = course?.relatedHomework || [];
     const submittedHomeworks = profile.value.homeworkHistory.filter((sub) =>
       homeworksForCourse.some((hw) => hw.id === sub.homeworkId),

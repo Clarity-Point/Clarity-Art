@@ -15,7 +15,35 @@ publishes `X.Y.Z`, `X.Y` and `X` tags; `main` publishes `latest`.
 
 ## [Unreleased]
 
+### Security
+
+- Validate browser mutation origins, sanitize JSON parser errors and bound request IDs.
+- Preserve nginx security headers for cached assets and bypass static-file matching for API paths.
+- Fail dependency audits closed on registry errors and block high build-tooling advisories.
+- Require CI before image publication and emit SBOM/provenance metadata.
+- Exclude environment variants and private drawings from Git and Docker build context.
+
+- Cleared every known dependency advisory in the runtime tree. Runtime
+  dependencies now report zero vulnerabilities from `npm audit`, including the
+  previously critical `proxy-addr` IP-spoofing advisory and twelve advisories
+  in `axios`, plus the `vue`, `dompurify`, `qs`, `js-yaml`, `fast-uri`,
+  `source-map-js`, `markdown-it`, `fast-copy` and `ip-address` advisories.
+- Pinned patched versions of Prisma CLI transitives (`mysql2`, `deepmerge-ts`)
+  that previously had no non-breaking upgrade path.
+- Replaced `nodemon` with Node's built-in `--watch`, which removes the
+  vulnerable `chokidar`/`braces` chain and a `shell-quote` advisory from the
+  build toolchain.
+- The dependency audit gate now fails on critical advisories in build tooling
+  and rejects allowlist entries that no longer match a real advisory, so a
+  fixed vulnerability cannot leave a permanent waiver behind.
+- `.audit-allowlist.json` is now empty: no advisory is waived.
+
 ### Changed
+
+- Remove unused image assets, Vue DevTools/phone parsing packages and redundant type stubs.
+- Use Express JSON parsing and Node UUID generation directly instead of extra direct dependencies.
+- Remove unreachable local-profile storage, offline diary branches and unused store actions.
+- Remove the obsolete startup script, consolidate ignore rules and trim generated config boilerplate.
 
 - Organisation analytics now require at least eight distinct active members in
   every released risk, time and trend bucket.
@@ -27,11 +55,25 @@ publishes `X.Y.Z`, `X.Y` and `X` tags; `main` publishes `latest`.
 
 ### Fixed
 
+- Prevent delayed profile and mutation responses from restoring data after logout or an account switch.
+- Keep logout retryable after network errors and ignore stale 401 responses from a previous session.
+- Preserve authoritative activity streaks and diary creation dates when entries are edited.
+- Return service-unavailable responses for authentication database outages instead of invalidating sessions.
+- Reuse the freshly loaded database role without a second user lookup on role-gated routes.
+
+- Repair narrow layouts, theme contrast, mobile navigation and nested modal focus.
+- Include diary entries in the PDF diary export and keep error notifications until dismissed.
+- Give homework and administrative fields accessible names.
+
 - Editing or deleting a diary entry now updates or removes its derived safety
   signal, tags and attention score instead of leaving stale analytics behind.
 - Homework submissions immediately synchronize canonical course progress.
 
 ### Tests
+
+- Add Chromium/axe checks for 20 routes in both themes at three viewport widths,
+  plus focus, API failure, reduced motion and editor checks.
+- Cover request origin validation, HTTP error privacy, PDF content and audit gate failures.
 
 - CI now applies every migration to a clean PostgreSQL 16 database and verifies
   that the resulting database matches the Prisma schema.

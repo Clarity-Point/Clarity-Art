@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useAnalyticsStore } from './analyticsStore';
 
 describe('analyticsStore account isolation', () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     const values = new Map<string, string>();
     Object.defineProperty(window, 'localStorage', {
@@ -34,5 +35,24 @@ describe('analyticsStore account isolation', () => {
     store.hydrateStreak(2, 'user-b');
     expect(store.currentStreak).toBe(2);
     expect(store.activityHistory).toEqual({});
+  });
+  it('preserves the server streak on the first activity after hydration', () => {
+    const store = useAnalyticsStore();
+    store.hydrateStreak(12, 'user-a');
+    store.recordActivity();
+    expect(store.currentStreak).toBe(12);
+  });
+
+  it('counts consecutive local calendar days across a daylight-saving change', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 24, 12));
+    const store = useAnalyticsStore();
+    store.hydrateStreak(12, 'user-a');
+    vi.setSystemTime(new Date(2026, 9, 25, 12));
+    store.recordActivity();
+    expect(store.currentStreak).toBe(13);
+    vi.setSystemTime(new Date(2026, 9, 28, 12));
+    store.recordActivity();
+    expect(store.currentStreak).toBe(1);
   });
 });

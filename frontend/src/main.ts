@@ -26,21 +26,46 @@ app.config.errorHandler = (error, _instance, info) => {
   );
 };
 
-// A stale/expired cookie should produce one predictable transition to login,
-// instead of leaving every screen to fail independently after a button click.
+// Attach a client generation to each request so a late 401 from an old
+// account cannot invalidate a newer login. This is local metadata, not a header.
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    sessionRevision?: number;
+  }
+}
+axios.interceptors.request.use((config) => {
+  config.sessionRevision = useAuthStore(pinia).sessionRevision;
+  return config;
+});
+
+let sessionRedirect: Promise<unknown> | null = null;
 axios.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error?.response?.status === 401 && router.currentRoute.value.name !== 'login') {
-      useAuthStore(pinia).expireSession();
-      useToastStore(pinia).info('Сессия завершилась. Войдите снова, чтобы продолжить.');
-      await router.replace({
-        name: 'login',
-        query: { redirect: router.currentRoute.value.fullPath },
-      });
+    const auth = useAuthStore(pinia);
+    if (
+      error?.response?.status === 401 &&
+      auth.isAuthenticated &&
+      error.config?.sessionRevision === auth.sessionRevision
+    ) {
+      auth.expireSession();
+      if (!sessionRedirect) {
+        useToastStore(pinia).info('Сессия завершилась. Войдите снова, чтобы продолжить.');
+        sessionRedirect = router
+          .replace({
+            name: 'login',
+            query: { redirect: router.currentRoute.value.fullPath },
+          })
+          .finally(() => {
+            sessionRedirect = null;
+          });
+      }
+      await sessionRedirect;
     }
     return Promise.reject(error);
   },
 );
 
-app.mount('#app');
+// Wait for the initial auth guard before mounting account-specific components.
+// Otherwise the header can mount anonymously and skip its first notifications fetch.
+router.isReady().then(() => app.mount('#app'));

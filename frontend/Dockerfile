@@ -34,6 +34,7 @@ RUN npm run build --workspace frontend
 FROM nginx:alpine AS runtime
 
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
+COPY frontend/security-headers.conf /etc/nginx/security-headers.conf
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Where /api/* is proxied. Override to point the SPA at a backend living

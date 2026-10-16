@@ -1,5 +1,5 @@
 <template>
-  <div class="auth-page">
+  <main class="auth-page">
     <div class="auth-card">
       <aside class="auth-aside">
         <div class="aside-mark"><BrandLogo :size="30" /></div>
@@ -60,7 +60,7 @@
             />
           </div>
 
-          <p v-if="error" class="error-message">
+          <p v-if="error" class="error-message" role="alert">
             <Icon name="alert-triangle" :size="16" /> {{ error }}
           </p>
 
@@ -74,7 +74,7 @@
         </p>
       </div>
     </div>
-  </div>
+  </main>
 </template>
 
 <script setup lang="ts">

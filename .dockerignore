@@ -11,8 +11,7 @@ backend/src/generated
 
 # Secrets must never enter an image layer — .env.example is the only one shipped.
 **/.env
-**/.env.local
-**/.env.*.local
+**/.env.*
 !**/.env.example
 
 .git
@@ -31,3 +30,9 @@ backend/src/generated
 .prettierignore
 eslint.config.js
 docker-compose*.yml
+
+# Private drawings and local browser artifacts never belong in build context.
+backend/data
+artifacts
+playwright-report
+test-results

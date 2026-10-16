@@ -5,10 +5,9 @@
       <p class="page-subtitle">Управляйте курсами и проверяйте задания участников программы.</p>
     </header>
 
-    <div class="tabs" role="tablist">
+    <div class="tabs" role="group" aria-label="Раздел администрирования">
       <button
-        role="tab"
-        :aria-selected="activeTab === 'courses'"
+        :aria-pressed="activeTab === 'courses'"
         @click="activeTab = 'courses'"
         :class="['tab-btn', { active: activeTab === 'courses' }]"
       >
@@ -16,8 +15,7 @@
         Управление курсами
       </button>
       <button
-        role="tab"
-        :aria-selected="activeTab === 'submissions'"
+        :aria-pressed="activeTab === 'submissions'"
         @click="activeTab = 'submissions'"
         :class="['tab-btn', { active: activeTab === 'submissions' }]"
       >
@@ -165,181 +163,224 @@
           </table>
         </div>
       </div>
+      <div v-else-if="submissionsError" class="empty-state">
+        <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
+        <p>{{ submissionsError }}</p>
+        <button class="btn-outline" @click="fetchSubmissions">
+          <Icon name="refresh-cw" :size="16" />
+          Повторить
+        </button>
+      </div>
+
       <div v-else class="empty-state">
         <span class="empty-icon"><Icon name="file-text" :size="32" /></span>
         <p>Пока никто не сдавал задания. Как только появятся работы, вы увидите их здесь.</p>
       </div>
     </section>
 
-    <!-- Course Edit Modal -->
-    <div
-      v-if="showCourseModal"
-      class="modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      @click.self="showCourseModal = false"
-    >
-      <div class="modal-content card">
-        <div class="modal-head">
-          <span class="medallion"><Icon name="book-open" :size="20" /></span>
-          <h3>{{ editingCourse.id ? 'Редактировать курс' : 'Новый курс' }}</h3>
-        </div>
-        <form @submit.prevent="saveCourse">
-          <div class="form-group">
-            <label>ID (латиницей)</label>
-            <input
-              v-model="editingCourse.id"
-              required
-              pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
-              placeholder="my-course"
-              :disabled="!!editingCourse._isEditing"
-            />
+    <Teleport to="body">
+      <!-- Course Edit Modal -->
+      <div
+        ref="courseDialog"
+        tabindex="-1"
+        aria-labelledby="course-dialog-title"
+        v-if="showCourseModal"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        @click.self="showCourseModal = false"
+      >
+        <div class="modal-content card">
+          <div class="modal-head">
+            <span class="medallion"><Icon name="book-open" :size="20" /></span>
+            <h3 id="course-dialog-title">
+              {{ editingCourse.id ? 'Редактировать курс' : 'Новый курс' }}
+            </h3>
           </div>
-          <div class="form-group">
-            <label>Название</label>
-            <input v-model="editingCourse.title" required />
-          </div>
-          <div class="form-group">
-            <label>Описание</label>
-            <textarea v-model="editingCourse.description" rows="3" required></textarea>
-          </div>
-          <div class="form-group">
-            <label>Категория</label>
-            <select v-model="editingCourse.category">
-              <option value="adult">Для взрослых</option>
-              <option value="svo">После трудного опыта</option>
-              <option value="child">Дети</option>
-            </select>
-          </div>
-          <section v-if="editingCourse._isEditing" class="content-builder">
-            <h4>Модули и уроки</h4>
-            <div
-              v-for="module in editingCourse.modules || []"
-              :key="module.id || module.title"
-              class="builder-block"
-            >
-              <div class="section-head compact-head">
-                <strong>{{ module.title }}</strong>
-                <button
-                  v-if="module.id"
-                  type="button"
-                  class="btn-ghost btn-sm danger-action"
-                  @click="removeModule(module.id)"
+          <form @submit.prevent="saveCourse">
+            <div class="form-group">
+              <label for="admin-field-1">ID (латиницей)</label>
+              <input
+                id="admin-field-1"
+                v-model="editingCourse.id"
+                required
+                pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+                placeholder="my-course"
+                :disabled="!!editingCourse._isEditing"
+              />
+            </div>
+            <div class="form-group">
+              <label for="admin-field-2">Название</label>
+              <input id="admin-field-2" v-model="editingCourse.title" required />
+            </div>
+            <div class="form-group">
+              <label for="admin-field-3">Описание</label>
+              <textarea
+                id="admin-field-3"
+                v-model="editingCourse.description"
+                rows="3"
+                required
+              ></textarea>
+            </div>
+            <div class="form-group">
+              <label for="admin-field-4">Категория</label>
+              <select id="admin-field-4" v-model="editingCourse.category">
+                <option value="adult">Для взрослых</option>
+                <option value="svo">После трудного опыта</option>
+                <option value="child">Дети</option>
+              </select>
+            </div>
+            <section v-if="editingCourse._isEditing" class="content-builder">
+              <h4>Модули и уроки</h4>
+              <div
+                v-for="module in editingCourse.modules || []"
+                :key="module.id || module.title"
+                class="builder-block"
+              >
+                <div class="section-head compact-head">
+                  <strong>{{ module.title }}</strong>
+                  <button
+                    v-if="module.id"
+                    type="button"
+                    class="btn-ghost btn-sm danger-action"
+                    @click="removeModule(module.id)"
+                  >
+                    Удалить модуль
+                  </button>
+                </div>
+                <div
+                  v-for="lesson in module.lessons"
+                  :key="lesson.id || lesson.title"
+                  class="builder-row"
                 >
-                  Удалить модуль
+                  <span>{{ lesson.title }}</span>
+                  <button
+                    v-if="lesson.id"
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Удалить урок"
+                    @click="removeLesson(lesson.id)"
+                  >
+                    <Icon name="trash" :size="15" />
+                  </button>
+                </div>
+                <div v-if="module.id" class="builder-add">
+                  <input
+                    :aria-label="`Название нового урока: ${module.title}`"
+                    v-model="newLessonTitles[module.id]"
+                    placeholder="Название нового урока"
+                  />
+                  <button type="button" class="btn-outline btn-sm" @click="addLesson(module.id)">
+                    Добавить урок
+                  </button>
+                </div>
+              </div>
+              <div class="builder-add">
+                <input
+                  aria-label="Название нового модуля"
+                  v-model="newModuleTitle"
+                  placeholder="Название нового модуля"
+                />
+                <button type="button" class="btn-outline btn-sm" @click="addModule">
+                  Добавить модуль
                 </button>
               </div>
+
+              <h4>Домашние задания</h4>
               <div
-                v-for="lesson in module.lessons"
-                :key="lesson.id || lesson.title"
+                v-for="homework in editingCourse.relatedHomework || []"
+                :key="homework.id"
                 class="builder-row"
               >
-                <span>{{ lesson.title }}</span>
+                <span>{{ homework.title }}</span>
                 <button
-                  v-if="lesson.id"
                   type="button"
                   class="icon-btn"
-                  aria-label="Удалить урок"
-                  @click="removeLesson(lesson.id)"
+                  aria-label="Удалить задание"
+                  @click="removeHomework(homework.id)"
                 >
                   <Icon name="trash" :size="15" />
                 </button>
               </div>
-              <div v-if="module.id" class="builder-add">
-                <input v-model="newLessonTitles[module.id]" placeholder="Название нового урока" />
-                <button type="button" class="btn-outline btn-sm" @click="addLesson(module.id)">
-                  Добавить урок
+              <div class="builder-homework">
+                <input
+                  aria-label="Название задания"
+                  v-model="newHomework.title"
+                  placeholder="Название задания"
+                />
+                <textarea
+                  aria-label="Описание задания"
+                  v-model="newHomework.description"
+                  rows="2"
+                  placeholder="Описание задания"
+                ></textarea>
+                <button type="button" class="btn-outline btn-sm" @click="addHomework">
+                  Добавить задание
                 </button>
               </div>
-            </div>
-            <div class="builder-add">
-              <input v-model="newModuleTitle" placeholder="Название нового модуля" />
-              <button type="button" class="btn-outline btn-sm" @click="addModule">
-                Добавить модуль
+            </section>
+            <p v-else class="muted builder-hint">
+              Сначала сохраните курс, затем добавьте модули, уроки и задания.
+            </p>
+            <div class="modal-actions">
+              <button type="button" @click="showCourseModal = false" class="btn-ghost">
+                Отмена
+              </button>
+              <button type="submit" class="btn-primary" :disabled="isSavingCourse">
+                {{ isSavingCourse ? 'Сохраняем…' : 'Сохранить' }}
               </button>
             </div>
+          </form>
+        </div>
+      </div>
 
-            <h4>Домашние задания</h4>
-            <div
-              v-for="homework in editingCourse.relatedHomework || []"
-              :key="homework.id"
-              class="builder-row"
-            >
-              <span>{{ homework.title }}</span>
-              <button
-                type="button"
-                class="icon-btn"
-                aria-label="Удалить задание"
-                @click="removeHomework(homework.id)"
-              >
-                <Icon name="trash" :size="15" />
-              </button>
-            </div>
-            <div class="builder-homework">
-              <input v-model="newHomework.title" placeholder="Название задания" />
-              <textarea
-                v-model="newHomework.description"
-                rows="2"
-                placeholder="Описание задания"
-              ></textarea>
-              <button type="button" class="btn-outline btn-sm" @click="addHomework">
-                Добавить задание
-              </button>
-            </div>
-          </section>
-          <p v-else class="muted builder-hint">
-            Сначала сохраните курс, затем добавьте модули, уроки и задания.
+      <!-- Grade Modal -->
+      <div
+        ref="gradeDialog"
+        tabindex="-1"
+        aria-labelledby="grade-dialog-title"
+        v-if="showGradeModal"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        @click.self="showGradeModal = false"
+      >
+        <div class="modal-content grade-modal card">
+          <div class="modal-head">
+            <span class="medallion medallion-accent"><Icon name="file-text" :size="20" /></span>
+            <h3 id="grade-dialog-title">Проверка: {{ currentSub.homeworkTitle }}</h3>
+          </div>
+          <p class="muted submitter-line">
+            <strong class="text-color">От пользователя:</strong> {{ currentSub.userEmail }}
           </p>
-          <div class="modal-actions">
-            <button type="button" @click="showCourseModal = false" class="btn-ghost">Отмена</button>
-            <button type="submit" class="btn-primary" :disabled="isSavingCourse">
-              {{ isSavingCourse ? 'Сохраняем…' : 'Сохранить' }}
-            </button>
+          <div class="submission-text">
+            <strong>Ответ пользователя</strong>
+            <pre>{{ currentSub.submittedContent }}</pre>
           </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Grade Modal -->
-    <div
-      v-if="showGradeModal"
-      class="modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      @click.self="showGradeModal = false"
-    >
-      <div class="modal-content grade-modal card">
-        <div class="modal-head">
-          <span class="medallion medallion-accent"><Icon name="file-text" :size="20" /></span>
-          <h3>Проверка: {{ currentSub.homeworkTitle }}</h3>
+          <form @submit.prevent="submitGrade">
+            <div class="form-group">
+              <label for="admin-field-5">Оценка (например, 5/5 или «Отлично»)</label>
+              <input id="admin-field-5" v-model="gradeForm.grade" required />
+            </div>
+            <div class="form-group">
+              <label for="admin-field-6">Отзыв / анализ</label>
+              <textarea
+                id="admin-field-6"
+                v-model="gradeForm.analysisText"
+                rows="5"
+                placeholder="Напишите конструктивный, поддерживающий отзыв..."
+              ></textarea>
+            </div>
+            <div class="modal-actions">
+              <button type="button" @click="showGradeModal = false" class="btn-ghost">
+                Отмена
+              </button>
+              <button type="submit" class="btn-primary">Сохранить оценку</button>
+            </div>
+          </form>
         </div>
-        <p class="muted submitter-line">
-          <strong class="text-color">От пользователя:</strong> {{ currentSub.userEmail }}
-        </p>
-        <div class="submission-text">
-          <strong>Ответ пользователя</strong>
-          <pre>{{ currentSub.submittedContent }}</pre>
-        </div>
-        <form @submit.prevent="submitGrade">
-          <div class="form-group">
-            <label>Оценка (например, 5/5 или «Отлично»)</label>
-            <input v-model="gradeForm.grade" required />
-          </div>
-          <div class="form-group">
-            <label>Отзыв / анализ</label>
-            <textarea
-              v-model="gradeForm.analysisText"
-              rows="5"
-              placeholder="Напишите конструктивный, поддерживающий отзыв..."
-            ></textarea>
-          </div>
-          <div class="modal-actions">
-            <button type="button" @click="showGradeModal = false" class="btn-ghost">Отмена</button>
-            <button type="submit" class="btn-primary">Сохранить оценку</button>
-          </div>
-        </form>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -349,6 +390,7 @@ import { useCoursesStore, type Course, type CourseDraft } from '@/stores/courses
 import { storeToRefs } from 'pinia';
 import axios from 'axios';
 import { useToastStore } from '@/stores/toastStore';
+import { useFocusScope } from '@/composables/useFocusScope';
 import Icon from '@/components/Icon.vue';
 
 interface Submission {
@@ -385,9 +427,30 @@ const newHomework = ref({ title: '', description: '' });
 
 const submissions = ref<Submission[]>([]);
 const submissionsLoading = ref(false);
+const submissionsError = ref('');
 const showGradeModal = ref(false);
 const currentSub = ref<Submission>(emptySubmission());
 const gradeForm = ref({ grade: '', analysisText: '' });
+
+const courseDialog = ref<HTMLElement | null>(null);
+const gradeDialog = ref<HTMLElement | null>(null);
+const overlayBackground = () => [...document.querySelectorAll<HTMLElement>('#app')];
+useFocusScope(
+  showCourseModal,
+  courseDialog,
+  () => {
+    showCourseModal.value = false;
+  },
+  overlayBackground,
+);
+useFocusScope(
+  showGradeModal,
+  gradeDialog,
+  () => {
+    showGradeModal.value = false;
+  },
+  overlayBackground,
+);
 
 const pendingCount = computed(() => submissions.value.filter((s) => !s.grade).length);
 
@@ -405,11 +468,19 @@ onMounted(async () => {
 
 const fetchSubmissions = async () => {
   submissionsLoading.value = true;
+  submissionsError.value = '';
   try {
     const response = await axios.get(`${API_URL}/admin/submissions`);
-    submissions.value = response.data;
+    submissions.value = Array.isArray(response.data) ? response.data : [];
   } catch (e) {
     console.error(e);
+    /*
+     * Without this the list silently falls back to its empty state, so a failed
+     * request looked exactly like "nobody has submitted anything" — and an
+     * administrator would conclude there was nothing to grade.
+     */
+    submissions.value = [];
+    submissionsError.value = 'Не удалось загрузить работы. Проверьте соединение.';
   } finally {
     submissionsLoading.value = false;
   }
@@ -421,6 +492,12 @@ const openCourseModal = (course?: Course) => {
   } else {
     editingCourse.value = { id: '', title: '', description: '', category: 'adult', modules: [] };
   }
+  // Drafts for modules, lessons and homework belong to whichever course was
+  // open before. Keeping them meant a half-typed title reappeared pre-filled
+  // when the next course's modal opened.
+  newModuleTitle.value = '';
+  newLessonTitles.value = {};
+  newHomework.value = { title: '', description: '' };
   showCourseModal.value = true;
 };
 
@@ -674,15 +751,16 @@ const submitGrade = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   padding: var(--space-5);
 }
 
 .modal-content {
   width: 100%;
   max-width: 500px;
-  max-height: 88vh;
+  max-height: calc(100dvh - var(--space-7));
   overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: var(--shadow-lg);
 }
 

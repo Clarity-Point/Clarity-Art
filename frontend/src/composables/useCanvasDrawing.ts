@@ -28,15 +28,39 @@ export function useCanvasDrawing() {
     isCanvasFullscreen.value = !isCanvasFullscreen.value;
   };
 
+  /*
+   * Translate a pointer/touch position into canvas backing-store coordinates.
+   *
+   * The element is CSS-resized (max-width: 100%, and 100vw/100vh in fullscreen)
+   * while the backing store keeps its intrinsic width/height. Returning raw
+   * clientX-offset values therefore draws at the wrong position whenever the
+   * two differ — on any viewport narrower than the canvas width, and always in
+   * fullscreen. Scaling by the ratio fixes both, and the `|| 1` guard keeps a
+   * zero-size layout (canvas hidden, display:none) from producing NaN that
+   * silently poisons the whole stroke.
+   */
   const getMousePos = (event: MouseEvent | TouchEvent): { x: number; y: number } => {
-    if (!drawingCanvasRef.value) return { x: 0, y: 0 };
-    const rect = drawingCanvasRef.value.getBoundingClientRect();
+    const canvas = drawingCanvasRef.value;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
+
+    let clientX: number;
+    let clientY: number;
     if (event instanceof MouseEvent) {
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      clientX = event.clientX;
+      clientY = event.clientY;
     } else if (event.touches && event.touches[0]) {
-      return { x: event.touches[0].clientX - rect.left, y: event.touches[0].clientY - rect.top };
+      clientX = event.touches[0].clientX;
+      clientY = event.touches[0].clientY;
+    } else {
+      return { x: 0, y: 0 };
     }
-    return { x: 0, y: 0 };
+
+    return {
+      x: ((clientX - rect.left) / rect.width) * canvas.width,
+      y: ((clientY - rect.top) / rect.height) * canvas.height,
+    };
   };
 
   const handleMouseDown = (event: MouseEvent) => {

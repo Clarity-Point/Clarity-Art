@@ -50,11 +50,11 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
     doc
       .fillColor('#3f51b5')
       .fontSize(30)
-      .text('КНИГА ИСЦЕЛЕНИЯ', 50, 200, { align: 'center', characterSpacing: 2 });
+      .text('ЛИЧНЫЙ ДНЕВНИК', 50, 200, { align: 'center', characterSpacing: 2 });
     doc
       .fontSize(15)
       .fillColor('#666')
-      .text('Ваш путь к внутренней гармонии через арт-терапию', { align: 'center' });
+      .text('Ваши записи и творческие практики', { align: 'center' });
     doc.moveDown(2);
     doc
       .fontSize(18)
@@ -71,6 +71,21 @@ export const exportDiaryPDF = async (req: AuthRequest, res: Response) => {
     doc.text(`Серия активности: ${user.streak} дней`);
     doc.text(`Набрано очков: ${user.points}`);
     doc.moveDown();
+
+    // Include the diary itself: the export must contain what its action promises.
+    if (user.diaryEntries.length > 0) {
+      doc.addPage();
+      doc.fillColor('#333').fontSize(20).text('Записи дневника', { underline: true });
+      doc.moveDown();
+      for (const entry of user.diaryEntries) {
+        doc
+          .fontSize(12)
+          .fillColor('#3f51b5')
+          .text(new Date(entry.date).toLocaleDateString('ru-RU'));
+        doc.fontSize(11).fillColor('#333').text(entry.content);
+        doc.moveDown();
+      }
+    }
 
     // Image Analysis History
     if (user.imageAnalyses.length > 0) {

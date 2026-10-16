@@ -4,6 +4,8 @@ import { logger } from '../config/logger';
 /** Error shape flowing through Express; `statusCode` is set by route handlers. */
 interface AppError extends Error {
   statusCode?: number;
+  status?: number;
+  type?: string;
 }
 
 export const globalErrorHandler = (
@@ -12,11 +14,19 @@ export const globalErrorHandler = (
   res: Response,
   _next: NextFunction,
 ) => {
-  const statusCode = err.statusCode || 500;
+  const proposedStatus = err.statusCode ?? err.status ?? 500;
+  const statusCode =
+    Number.isInteger(proposedStatus) && proposedStatus >= 400 && proposedStatus <= 599
+      ? proposedStatus
+      : 500;
   // Never leak internal error details to the client for server-side (5xx) errors;
   // the full message and stack are still recorded in the server log below.
   const message =
-    statusCode >= 500 ? 'Internal server error' : err.message || 'Internal Server Error';
+    err.type === 'entity.parse.failed'
+      ? 'Некорректный JSON в запросе'
+      : statusCode >= 500
+        ? 'Internal server error'
+        : err.message || 'Invalid request';
 
   logger.error(
     {
@@ -24,8 +34,9 @@ export const globalErrorHandler = (
       method: req.method,
       url: req.url,
       err: {
-        message: err.message,
-        stack: err.stack,
+        // JSON parser errors can embed raw request bodies, including passwords.
+        message: err.type === 'entity.parse.failed' ? 'Invalid JSON body' : err.message,
+        stack: err.type === 'entity.parse.failed' ? undefined : err.stack,
         statusCode,
       },
     },

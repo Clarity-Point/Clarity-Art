@@ -14,6 +14,9 @@ export default tseslint.config(
       '**/dist/**',
       '**/dist-ssr/**',
       '**/coverage/**',
+      'test-results/**',
+      'playwright-report/**',
+      'artifacts/**',
       '**/*.min.js',
       'backend/prisma/migrations/**',
       'frontend/public/**',
@@ -43,7 +46,13 @@ export default tseslint.config(
 
   // Node-side TypeScript / scripts (backend, repo tooling).
   {
-    files: ['backend/**/*.{ts,js}', 'scripts/**/*.{js,mjs,cjs}', '**/*.config.{ts,js}', '**/*.cjs'],
+    files: [
+      'backend/**/*.{ts,js}',
+      'scripts/**/*.{js,mjs,cjs}',
+      '**/*.config.{ts,js}',
+      'tests/browser/**/*.ts',
+      '**/*.cjs',
+    ],
     languageOptions: { globals: { ...globals.node } },
   },
 
@@ -70,7 +79,6 @@ export default tseslint.config(
       '@typescript-eslint/no-require-imports': 'off',
       'vue/multi-word-component-names': 'off',
       'no-empty': ['warn', { allowEmptyCatch: true }],
-      'no-console': 'off',
     },
   },
 );

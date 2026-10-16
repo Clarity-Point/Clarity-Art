@@ -53,14 +53,18 @@ export function useDiaryAnalysis() {
 
   const performDiaryAnalysis = async () => {
     const entriesToAnalyze = getEntriesForPeriod();
+    isAnalyzingDiary.value = false;
+    // Whatever the previous period produced is now stale. Leaving it on screen
+    // while another chip is highlighted means the user reads a "week" summary
+    // believing it covers the month they just selected.
+    diaryAnalysisResult.value = null;
+    diaryAnalysisError.value = null;
+
     if (entriesToAnalyze.length === 0) {
       diaryAnalysisError.value = `Нет записей для анализа за выбранный период (${analysisPeriod.value}).`;
-      diaryAnalysisResult.value = null;
       return;
     }
     isAnalyzingDiary.value = true;
-    diaryAnalysisResult.value = null;
-    diaryAnalysisError.value = null;
     const entriesText = entriesToAnalyze
       .map((e) => `Дата: ${new Date(e.date).toLocaleString('ru-RU')}\nЗапись: ${e.text}`)
       .join('\n\n---\n\n');

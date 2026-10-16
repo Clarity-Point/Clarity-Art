@@ -8,8 +8,35 @@ import { AnalyticsService } from '../services/analyticsService';
 import { validateImageInput, validateTextInput } from '../security/inputValidation';
 import { createLogger } from '../config/logger';
 import { readStoredImage, removeStoredImage, storeImage } from '../services/imageStorageService';
+import { canUseConfiguredAI } from '../services/aiConsentService';
 
 const log = createLogger('aiController');
+
+/** Cap on stored images per user, enforced on the server rather than the client. */
+const MAX_STORED_IMAGES = 500;
+const MAX_QUESTIONS = 20;
+const MAX_QUESTION_FIELD = 2_000;
+
+/** Image types this endpoint is allowed to serve for legacy inline rows. */
+const LEGACY_INLINE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+/**
+ * `extendedQuestions` is persisted as a JSON column straight from the request
+ * body. Without bounding its shape, a client can persist an arbitrarily large
+ * or deeply nested structure and have it re-read on every profile load.
+ */
+function sanitizeQuestions(input: unknown): Array<Record<string, string>> {
+  if (!Array.isArray(input)) return [];
+  return input.slice(0, MAX_QUESTIONS).flatMap((item) => {
+    if (typeof item !== 'object' || item === null) return [];
+    const record = item as Record<string, unknown>;
+    const pick = (key: string) =>
+      typeof record[key] === 'string' ? (record[key] as string).slice(0, MAX_QUESTION_FIELD) : '';
+    return [
+      { questionText: pick('questionText'), rationale: pick('rationale'), answer: pick('answer') },
+    ];
+  });
+}
 
 export const chat = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -20,8 +47,11 @@ export const chat = async (req: AuthRequest, res: Response) => {
   const safeMessage = messageValidation.value;
 
   try {
+    // Defence in depth: the route already requires consent, but the provider
+    // calls below must never be reachable without it re-verified here.
+    const allowProvider = await canUseConfiguredAI(req.user.id);
     const { content: reply, usage } = await AIService.generateText(safeMessage);
-    const riskLevel = await analyzeCrisisRisk(safeMessage);
+    const riskLevel = await analyzeCrisisRisk(safeMessage, allowProvider);
 
     // Get or create session. Only allow access to sessions owned by the user.
     let session;
@@ -88,9 +118,14 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
   if (!messageValidation.ok) return res.status(400).json({ error: messageValidation.error });
   const safeMessage = messageValidation.value;
 
+  // Declared before the first provider call so an early disconnect is still
+  // observed, and so the abort handler below can be attached exactly once.
+  const abort = new AbortController();
+
   try {
-    const riskLevel = await analyzeCrisisRisk(safeMessage);
-    const tags = await AIService.extractTags(safeMessage);
+    const allowProvider = await canUseConfiguredAI(req.user.id);
+    const riskLevel = await analyzeCrisisRisk(safeMessage, allowProvider);
+    const tags = await AIService.extractTags(safeMessage, allowProvider);
     await AnalyticsService.logSentiment(req.user.id, riskLevel, tags, safeMessage);
 
     // Get previous messages for context
@@ -140,7 +175,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       data: { sessionId: activeSessionId, role: 'user', content: safeMessage },
     });
 
-    const stream = await AIService.generateTextStream(messages, req.user.id);
+    const stream = await AIService.generateTextStream(messages, req.user.id, abort.signal);
 
     // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
@@ -151,6 +186,21 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let upstreamBuffer = '';
+
+    /*
+     * The client going away is the normal case, not an exception: the user
+     * closes the tab, switches view or loses connectivity mid-answer. Without
+     * this the read loop keeps pulling (and paying for) a reply nobody reads,
+     * the upstream socket stays pinned, and each abandoned tab leaks a
+     * connection until the process runs out of them.
+     */
+    const releaseUpstream = () => {
+      void reader.cancel().catch(() => undefined);
+    };
+    res.on('close', () => {
+      abort.abort();
+      releaseUpstream();
+    });
 
     const forwardEvent = (event: string) => {
       for (const line of event.split('\n')) {
@@ -172,6 +222,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     };
 
     while (true) {
+      if (abort.signal.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
       upstreamBuffer += decoder.decode(value, { stream: true });
@@ -180,9 +231,16 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       events.forEach(forwardEvent);
     }
     upstreamBuffer += decoder.decode();
-    if (upstreamBuffer.trim()) forwardEvent(upstreamBuffer);
+    if (upstreamBuffer.trim() && !abort.signal.aborted) forwardEvent(upstreamBuffer);
 
-    // After stream ends, save assistant reply to DB
+    // After stream ends, save assistant reply to DB. An aborted stream is not an
+    // error the user needs to see, and the truncated text is not worth storing
+    // as if the assistant had finished its answer.
+    if (abort.signal.aborted) {
+      log.info('Chat stream aborted by the client before completion');
+      return res.end();
+    }
+
     if (fullReply) {
       await prisma.chatMessage.create({
         data: { sessionId: activeSessionId, role: 'assistant', content: fullReply },
@@ -194,6 +252,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     res.end();
   } catch (error: unknown) {
     log.error({ err: error instanceof Error ? error.message : String(error) }, 'Chat stream error');
+    if (abort.signal.aborted) return res.end();
     if (!res.headersSent) {
       return res.status(502).json({ error: 'Не удалось получить ответ ассистента' });
     }
@@ -255,12 +314,10 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
   const safePrompt = promptValidation.value;
 
   try {
-    const { content: reply, usage } = await AIService.analyzeImage(
-      safePrompt,
-      mimeType,
-      base64Image,
-    );
-
+    // Verify ownership BEFORE spending an AI call. Sending the image upstream
+    // and only then rejecting the request would both burn provider capacity and
+    // transmit a picture to a third party on behalf of an id the caller does not
+    // own.
     let analysis;
     if (typeof analysisId === 'string' && analysisId) {
       const owned = await prisma.imageAnalysis.findFirst({
@@ -268,16 +325,42 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
         select: { id: true },
       });
       if (!owned) return res.status(404).json({ error: 'Image analysis not found' });
+    }
+
+    // Consent is re-checked here as defence in depth, so the image cannot reach
+    // an external provider even if this route is ever mounted without the
+    // requireAIConsent middleware.
+    const allowProvider = await canUseConfiguredAI(req.user.id);
+    const { content: reply, usage } = await AIService.analyzeImage(
+      safePrompt,
+      mimeType,
+      base64Image,
+      allowProvider,
+    );
+
+    if (typeof analysisId === 'string' && analysisId) {
       analysis = await prisma.imageAnalysis.update({
         where: { id: analysisId },
         data: {
           extendedAnalysisText: reply,
-          ...(Array.isArray(extendedQuestions) ? { extendedQuestions } : {}),
+          ...(Array.isArray(extendedQuestions)
+            ? { extendedQuestions: sanitizeQuestions(extendedQuestions) }
+            : {}),
           tokensPrompt: { increment: usage?.prompt_tokens || 0 },
           tokensCompletion: { increment: usage?.completion_tokens || 0 },
         },
       });
     } else {
+      // Storage is bounded on the server. The upload is capped per request, but
+      // without a per-user ceiling a single account can fill the shared volume
+      // and deny service to every other user on the deployment.
+      const stored = await prisma.imageAnalysis.count({ where: { userId: req.user.id } });
+      if (stored >= MAX_STORED_IMAGES) {
+        return res.status(507).json({
+          error: 'Достигнут лимит сохранённых работ. Удалите старые анализы в профиле.',
+        });
+      }
+
       const imageStorageKey = await storeImage(base64Image, mimeType);
       try {
         analysis = await prisma.imageAnalysis.create({
@@ -331,7 +414,19 @@ export const getStoredImage = async (req: AuthRequest, res: Response) => {
     if (image.imageUrl?.startsWith('data:')) {
       const match = image.imageUrl.match(/^data:([^;]+);base64,(.+)$/);
       if (!match) return res.status(404).json({ error: 'Image data not found' });
+      /*
+       * The media type travels in the data URL, which for legacy rows is
+       * whatever was stored. Serving it back verbatim lets a stored value like
+       * `text/html` turn this endpoint into a same-origin XSS sink: the browser
+       * would render attacker markup from the app's own origin.
+       */
+      if (!LEGACY_INLINE_MIME_TYPES.has(match[1])) {
+        return res.status(404).json({ error: 'Image data not found' });
+      }
+      // Re-derive the response type from the validated set rather than echoing.
       res.type(match[1]);
+      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       return res.send(Buffer.from(match[2], 'base64'));
     }
     return res.status(404).json({ error: 'Image data not found' });
