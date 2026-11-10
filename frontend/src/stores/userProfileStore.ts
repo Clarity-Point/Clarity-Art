@@ -43,6 +43,7 @@ export interface HomeworkEntry {
 
 export interface DiaryEntry {
   id: string;
+  version?: number;
   date: string;
   text: string;
   analysis?: {
@@ -93,6 +94,7 @@ export interface UserProfile {
 }
 
 export const useUserProfileStore = defineStore('userProfile', () => {
+  const diaryUpdateError = ref('');
   const getInitialProfile = (): UserProfile => {
     // Do not restore sensitive profile, diary or chat data from browser storage.
     // Remove stale data written by pre-hardening versions on next application load.
@@ -188,6 +190,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
   }
 
   function resetProfile() {
+    diaryUpdateError.value = '';
     profileRevision++;
     profile.value = getInitialProfile();
     resetMoodTheme();
@@ -287,6 +290,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       if (revision !== profileRevision) return false;
       const newEntry: DiaryEntry = {
         id: response.data.id,
+        version: response.data.version,
         date: response.data.date,
         text: response.data.content,
         analysis: { mood: response.data.riskLevel },
@@ -302,11 +306,15 @@ export const useUserProfileStore = defineStore('userProfile', () => {
   }
 
   async function updateDiaryEntry(entryId: string, updates: Partial<DiaryEntry>): Promise<boolean> {
+    diaryUpdateError.value = '';
     const revision = profileRevision;
     const index = profile.value.diaryEntries.findIndex((e) => e.id === entryId);
     if (index > -1) {
       try {
-        const response = await axios.put(`${API_URL}/diary/${entryId}`, { content: updates.text });
+        const response = await axios.put(`${API_URL}/diary/${entryId}`, {
+          content: updates.text,
+          version: updates.version ?? profile.value.diaryEntries[index].version,
+        });
         if (revision !== profileRevision) return false;
         // Use the authoritative original date and refreshed analysis. Editing
         // a past entry must not silently move it to today's calendar cell.
@@ -316,10 +324,16 @@ export const useUserProfileStore = defineStore('userProfile', () => {
         profile.value.diaryEntries[currentIndex] = {
           ...current,
           text: response.data.content,
+          version: response.data.version,
           date: response.data.date,
           analysis: { ...current.analysis, mood: response.data.riskLevel },
         };
-      } catch {
+      } catch (error) {
+        if (revision !== profileRevision) return false;
+        diaryUpdateError.value =
+          axios.isAxiosError(error) && error.response?.status === 409
+            ? 'Запись изменена в другой вкладке. Скопируйте свой текст и обновите страницу перед повторным редактированием.'
+            : 'Не удалось обновить запись. Изменения оставлены в редакторе.';
         console.error('Failed to update diary on backend');
         return false;
       }
@@ -370,6 +384,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
   }
 
   return {
+    diaryUpdateError,
     profile,
     moodTheme,
     updateMoodTheme,

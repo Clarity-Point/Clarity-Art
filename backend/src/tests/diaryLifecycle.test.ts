@@ -37,7 +37,7 @@ import { updateDiaryEntry } from '../controllers/diaryController';
 describe('diary derived-data lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.findUnique.mockResolvedValue({ id: 'entry-1', userId: 'user-1' });
+    mocks.findUnique.mockResolvedValue({ id: 'entry-1', userId: 'user-1', version: 1 });
     mocks.analyzeRisk.mockResolvedValue('high');
     mocks.extractTags.mockResolvedValue(['Тревога']);
     mocks.update.mockResolvedValue({ id: 'entry-1', riskLevel: 'high', tags: ['Тревога'] });
@@ -53,7 +53,7 @@ describe('diary derived-data lifecycle', () => {
     const req = {
       user: { id: 'user-1' },
       params: { id: 'entry-1' },
-      body: { content: 'Мне очень тяжело, я не хочу жить' },
+      body: { content: 'Мне очень тяжело, я не хочу жить', version: 1 },
     } as unknown as AuthRequest;
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
@@ -63,7 +63,7 @@ describe('diary derived-data lifecycle', () => {
 
     expect(mocks.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'entry-1' },
+        where: { id: 'entry-1', userId: 'user-1', version: 1 },
         data: expect.objectContaining({ riskLevel: 'high', tags: ['Тревога'] }),
       }),
     );

@@ -8,7 +8,15 @@ const mocks = vi.hoisted(() => ({
   recordActivity: vi.fn(),
 }));
 
-vi.mock('axios', () => ({ default: { post: mocks.post, put: mocks.put, delete: mocks.delete } }));
+vi.mock('axios', () => ({
+  default: {
+    post: mocks.post,
+    put: mocks.put,
+    delete: mocks.delete,
+    isAxiosError: (error: unknown) =>
+      Boolean(error && typeof error === 'object' && 'isAxiosError' in error),
+  },
+}));
 vi.mock('./analyticsStore', () => ({
   useAnalyticsStore: () => ({ recordActivity: mocks.recordActivity }),
 }));
@@ -107,6 +115,17 @@ describe('user profile course progress', () => {
       date: '2026-09-01T09:00:00Z',
       analysis: { mood: 'low' },
     });
+  });
+  it('sends the editor snapshot version and preserves local data on conflict', async () => {
+    const store = useUserProfileStore();
+    store.hydrateProfile({
+      diaryEntries: [{ id: 'entry', text: 'Original', date: '2026-11-10', version: 3 }],
+    });
+    mocks.put.mockRejectedValueOnce({ isAxiosError: true, response: { status: 409 } });
+    expect(await store.updateDiaryEntry('entry', { text: 'My edit', version: 2 })).toBe(false);
+    expect(mocks.put).toHaveBeenCalledWith('/api/diary/entry', { content: 'My edit', version: 2 });
+    expect(store.profile.diaryEntries[0].text).toBe('Original');
+    expect(store.diaryUpdateError).toContain('другой вкладке');
   });
   it.each(['profile', 'course', 'homework', 'edit-diary', 'delete-diary'] as const)(
     'ignores a stale %s mutation after switching accounts',

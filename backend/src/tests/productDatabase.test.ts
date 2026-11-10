@@ -68,8 +68,8 @@ describe.runIf(process.env.RUN_DATABASE_TESTS === 'true')(
       });
     });
     afterAll(async () => {
-      await prisma.course.deleteMany({ where: { id: courseId } });
       await prisma.user.deleteMany({ where: { id: { in: [owner, other, admin] } } });
+      await prisma.course.deleteMany({ where: { id: courseId } });
       await prisma.$disconnect();
     });
     it('enforces draft ownership and allows exactly one concurrent version update', async () => {

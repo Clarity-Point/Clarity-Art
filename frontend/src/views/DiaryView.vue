@@ -159,10 +159,20 @@
               aria-label="Текст записи"
               v-model="currentEditText"
               class="edit-textarea"
+              maxlength="5000"
+              :disabled="isSavingEdit"
             ></textarea>
             <div class="edit-actions">
-              <button class="btn-outline btn-sm" @click="cancelEdit">Отмена</button>
-              <button class="btn-primary btn-sm" @click="saveEdit">Сохранить</button>
+              <button class="btn-outline btn-sm" :disabled="isSavingEdit" @click="cancelEdit">
+                Отмена
+              </button>
+              <button
+                class="btn-primary btn-sm"
+                :disabled="isSavingEdit || !currentEditText.trim()"
+                @click="saveEdit"
+              >
+                {{ isSavingEdit ? 'Сохраняем…' : 'Сохранить' }}
+              </button>
             </div>
           </div>
           <div v-else>
@@ -213,6 +223,7 @@ const {
   newEntryText,
   entryError,
   isSavingEntry,
+  isSavingEdit,
   composerTextarea,
   focusComposer,
   editingEntryId,
@@ -263,6 +274,7 @@ watch(
       if (!store.profile.diaryEntries.some((entry) => entry.id === data.id))
         store.profile.diaryEntries.unshift({
           id: data.id,
+          version: data.version,
           text: data.content,
           date: data.date,
           analysis: { mood: data.riskLevel },

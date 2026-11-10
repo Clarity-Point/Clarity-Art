@@ -39,7 +39,17 @@
           <transition name="pop">
             <div v-if="showNotifications" id="notifications-panel" class="dropdown noti-dropdown">
               <div class="dropdown-head">Уведомления</div>
-              <div v-if="notifications.length === 0" class="dropdown-empty">
+              <p v-if="notificationsLoading" role="status">Загружаем уведомления…</p>
+              <div v-if="notificationsError" class="dropdown-empty">
+                <p role="alert">{{ notificationsError }}</p>
+                <button class="btn-outline btn-sm" @click="fetchNotifications()">
+                  Повторить загрузку
+                </button>
+              </div>
+              <div
+                v-else-if="!notificationsLoading && notifications.length === 0"
+                class="dropdown-empty"
+              >
                 <Icon name="bell" :size="24" />
                 <span>Пока пусто</span>
               </div>
@@ -52,6 +62,14 @@
                 <div class="noti-title">{{ n.title }}</div>
                 <div class="noti-msg">{{ n.message }}</div>
                 <small class="faint">{{ new Date(n.date).toLocaleDateString('ru-RU') }}</small>
+              </button>
+              <button
+                v-if="notificationsCursor"
+                class="btn-outline btn-sm"
+                :disabled="notificationsLoading"
+                @click="fetchNotifications(true)"
+              >
+                Загрузить ещё
               </button>
             </div>
           </transition>
@@ -105,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useUserProfileStore } from '@/stores/userProfileStore';
@@ -137,7 +155,11 @@ const showNotifications = ref(false);
 const showUser = ref(false);
 const notiRef = ref<HTMLElement | null>(null);
 const userRef = ref<HTMLElement | null>(null);
-const unreadCount = computed(() => notifications.value.filter((n) => !n.isRead).length);
+const unreadCount = ref(0);
+const notificationsCursor = ref<string | null>(null);
+const notificationsLoading = ref(false);
+const notificationsError = ref('');
+let notificationRequest = 0;
 
 const initials = computed(() => {
   const name = (profile.value.name || '').trim();
@@ -152,6 +174,7 @@ const initials = computed(() => {
 const toggleNoti = () => {
   showNotifications.value = !showNotifications.value;
   showUser.value = false;
+  if (showNotifications.value) void fetchNotifications();
 };
 const toggleUser = () => {
   showUser.value = !showUser.value;
@@ -162,8 +185,9 @@ const closeUser = () => {
 };
 
 const onClickOutside = (e: MouseEvent) => {
-  if (notiRef.value && !notiRef.value.contains(e.target as Node)) showNotifications.value = false;
-  if (userRef.value && !userRef.value.contains(e.target as Node)) showUser.value = false;
+  const path = e.composedPath();
+  if (notiRef.value && !path.includes(notiRef.value)) showNotifications.value = false;
+  if (userRef.value && !path.includes(userRef.value)) showUser.value = false;
 };
 
 const onEscape = (event: KeyboardEvent) => {
@@ -174,23 +198,67 @@ const onEscape = (event: KeyboardEvent) => {
   wrapper?.querySelector('button')?.focus();
 };
 
-const fetchNotifications = async () => {
-  if (!isAuthenticated.value) return;
+const fetchNotifications = async (more = false) => {
+  if (!isAuthenticated.value || notificationsLoading.value) return;
+  const revision = authStore.sessionRevision;
+  const current = ++notificationRequest;
+  notificationsLoading.value = true;
+  notificationsError.value = '';
   try {
-    const res = await axios.get(`${API_URL}/notifications`);
-    notifications.value = res.data;
+    const res = await axios.get(`${API_URL}/notifications`, {
+      params: more ? { cursor: notificationsCursor.value } : {},
+    });
+    if (revision !== authStore.sessionRevision || current !== notificationRequest) return;
+    const rows: Notification[] = Array.isArray(res.data) ? res.data : [];
+    notifications.value = more
+      ? [
+          ...notifications.value,
+          ...rows.filter((row) => !notifications.value.some((item) => item.id === row.id)),
+        ]
+      : rows;
+    notificationsCursor.value = res.headers['x-next-cursor'] || null;
+    unreadCount.value = Number(
+      res.headers['x-unread-count'] ?? rows.filter((row) => !row.isRead).length,
+    );
   } catch {
-    /* silent */
+    if (revision === authStore.sessionRevision && current === notificationRequest)
+      notificationsError.value = 'Не удалось загрузить уведомления.';
+  } finally {
+    if (current === notificationRequest) notificationsLoading.value = false;
   }
 };
 
+watch(
+  () => [authStore.sessionRevision, user.value?.id],
+  (current, previous) => {
+    notificationRequest++;
+    notifications.value = [];
+    unreadCount.value = 0;
+    notificationsCursor.value = null;
+    notificationsLoading.value = false;
+    notificationsError.value = '';
+    if (current[1] !== previous?.[1]) {
+      showNotifications.value = false;
+      showUser.value = false;
+    }
+    void fetchNotifications();
+  },
+  { immediate: true },
+);
+
 const readNoti = async (id: string) => {
+  const revision = authStore.sessionRevision;
   try {
     await axios.put(`${API_URL}/notifications/${id}/read`);
+    if (revision !== authStore.sessionRevision) return;
     const noti = notifications.value.find((n) => n.id === id);
-    if (noti) noti.isRead = true;
+    if (noti && !noti.isRead) {
+      noti.isRead = true;
+      unreadCount.value = Math.max(0, unreadCount.value - 1);
+    }
   } catch {
-    /* silent */
+    if (revision === authStore.sessionRevision)
+      useToastStore().error('Не удалось отметить уведомление прочитанным.');
   }
 };
 
@@ -216,13 +284,15 @@ onMounted(() => {
     isDark.value = true;
     document.documentElement.setAttribute('data-theme', 'dark');
   }
-  fetchNotifications();
-  pollId = window.setInterval(fetchNotifications, 60000);
+  pollId = window.setInterval(() => {
+    if (!showNotifications.value) void fetchNotifications();
+  }, 60000);
   document.addEventListener('click', onClickOutside);
   document.addEventListener('keydown', onEscape);
 });
 
 onBeforeUnmount(() => {
+  notificationRequest++;
   if (pollId) clearInterval(pollId);
   document.removeEventListener('click', onClickOutside);
   document.removeEventListener('keydown', onEscape);

@@ -77,8 +77,10 @@ export const deleteCourse = async (req: AuthRequest, res: Response) => {
     }
     await prisma.course.delete({ where: { id } });
     res.json({ message: 'Course deleted' });
-  } catch {
-    return res.status(500).json({ error: 'Error deleting course' });
+  } catch (error) {
+    if (typeof error === 'object' && error && 'code' in error && error.code === 'P2003')
+      return res.status(409).json({ error: 'Курс уже используется. Удаление отменено.' });
+    throw error;
   }
 };
 
@@ -163,8 +165,13 @@ export const deleteHomework = async (req: AuthRequest, res: Response) => {
   try {
     await prisma.homework.delete({ where: { id } });
     res.status(204).end();
-  } catch {
-    res.status(404).json({ error: 'Homework not found' });
+  } catch (error) {
+    if (typeof error === 'object' && error && 'code' in error) {
+      if (error.code === 'P2003')
+        return res.status(409).json({ error: 'Задание уже содержит ответы. Удаление отменено.' });
+      if (error.code === 'P2025') return res.status(404).json({ error: 'Homework not found' });
+    }
+    throw error;
   }
 };
 

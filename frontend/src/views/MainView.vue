@@ -382,7 +382,7 @@ function formatDate(d: string) {
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
   margin-bottom: var(--space-6);
 }
@@ -395,6 +395,10 @@ function formatDate(d: string) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+.stat-tile > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .stat-ic {
   display: inline-flex;
@@ -571,7 +575,7 @@ function formatDate(d: string) {
     grid-template-columns: 1fr;
   }
   .stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 720px) {
@@ -581,6 +585,10 @@ function formatDate(d: string) {
   }
 }
 @media (max-width: 560px) {
+  .stat-tile {
+    flex-direction: column;
+    align-items: flex-start;
+  }
   .greeting {
     flex-direction: column;
   }

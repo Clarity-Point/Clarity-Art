@@ -4,8 +4,7 @@ import { storeToRefs } from 'pinia';
 
 /**
  * Diary entry CRUD + composer state for DiaryView: create, inline edit,
- * delete (with confirm) and the sorted list. Extracted verbatim — same store
- * mutations, same confirm dialog, same ordering.
+ * delete (with confirm) and the sorted list.
  */
 export function useDiaryEntries() {
   const userProfileStore = useUserProfileStore();
@@ -15,6 +14,8 @@ export function useDiaryEntries() {
   const newEntryText = ref('');
   const entryError = ref('');
   const isSavingEntry = ref(false);
+  const isSavingEdit = ref(false);
+  let editVersion: number | undefined;
   const composerTextarea = ref<HTMLTextAreaElement | null>(null);
 
   const focusComposer = () => {
@@ -27,28 +28,43 @@ export function useDiaryEntries() {
   const currentEditText = ref<string>('');
 
   const startEdit = (entry: DiaryEntry) => {
+    if (isSavingEdit.value) return;
     editingEntryId.value = entry.id;
     currentEditText.value = entry.text;
+    editVersion = entry.version;
     // A banner describing a previous failed save must not stay on screen while
     // the user is typing the retry.
     entryError.value = '';
   };
 
   const saveEdit = async () => {
-    if (editingEntryId.value && currentEditText.value.trim() !== '') {
+    if (isSavingEdit.value || !editingEntryId.value) return;
+    if (!currentEditText.value.trim()) {
+      entryError.value = 'Запись не должна быть пустой.';
+      return;
+    }
+    isSavingEdit.value = true;
+    try {
       const saved = await userProfileStore.updateDiaryEntry(editingEntryId.value, {
         text: currentEditText.value.trim(),
+        version: editVersion,
       });
       if (!saved) {
-        entryError.value = 'Не удалось обновить запись. Изменения оставлены в редакторе.';
+        entryError.value =
+          userProfileStore.diaryUpdateError ||
+          'Не удалось обновить запись. Изменения оставлены в редакторе.';
         return;
       }
+      entryError.value = '';
+      editingEntryId.value = null;
+      currentEditText.value = '';
+    } finally {
+      isSavingEdit.value = false;
     }
-    entryError.value = '';
-    cancelEdit(); // Reset editing state
   };
 
   const cancelEdit = () => {
+    if (isSavingEdit.value) return;
     editingEntryId.value = null;
     currentEditText.value = '';
   };
@@ -100,6 +116,7 @@ export function useDiaryEntries() {
     newEntryText,
     entryError,
     isSavingEntry,
+    isSavingEdit,
     composerTextarea,
     focusComposer,
     editingEntryId,

@@ -15,7 +15,7 @@ import { AIService } from '../services/aiService';
 import { createLogger } from '../config/logger';
 import { recordAudit } from '../services/auditService';
 import { AI_DATA_PROCESSING_MODE, AI_ENABLED, AI_REQUIRES_CONSENT } from '../config/ai';
-import { removeStoredImage } from '../services/imageStorageService';
+import { processImageDeletions } from '../services/imageDeletionService';
 
 const log = createLogger('authController');
 
@@ -232,6 +232,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       // Normalise to the shape the frontend consumes (`text`, plus parsed analysis).
       diaryEntries: user.diaryEntries.slice(0, 100).map((de) => ({
         id: de.id,
+        version: de.version,
         date: de.date,
         text: de.content,
         analysis: de.riskLevel ? { mood: de.riskLevel } : undefined,
@@ -449,19 +450,30 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
     where: { id: req.user.id },
     select: {
       password: true,
-      imageAnalyses: { select: { imageStorageKey: true } },
     },
   });
   if (!user || !(await bcrypt.compare(validation.data.password, user.password))) {
     return res.status(400).json({ error: 'Текущий пароль указан неверно' });
   }
-  const imagesRemoved = user.imageAnalyses.filter((image) => image.imageStorageKey).length;
-  await prisma.user.delete({ where: { id: req.user.id } });
-  await Promise.all(
-    user.imageAnalyses
-      .flatMap((image) => (image.imageStorageKey ? [image.imageStorageKey] : []))
-      .map(removeStoredImage),
-  );
+  const userId = req.user.id;
+  const imagesQueued = await prisma.$transaction(async (tx) => {
+    // Locks out concurrent image inserts and password changes until deletion commits.
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "User" WHERE id = ${userId} AND password = ${user.password} FOR UPDATE`;
+    if (!locked.length) return null;
+    const images = await tx.imageAnalysis.findMany({
+      where: { userId },
+      select: { imageStorageKey: true },
+    });
+    const keys = images.flatMap((image) =>
+      image.imageStorageKey ? [{ storageKey: image.imageStorageKey }] : [],
+    );
+    if (keys.length) await tx.imageDeletion.createMany({ data: keys, skipDuplicates: true });
+    await tx.user.delete({ where: { id: userId } });
+    return keys.length;
+  });
+  if (imagesQueued === null)
+    return res.status(409).json({ error: 'Аккаунт изменён другим запросом. Войдите заново.' });
   recordAudit({
     action: 'account.deleted',
     // The actor row is gone by now; the id is kept so the trail still ties this
@@ -470,10 +482,11 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
     outcome: 'success',
     requestId: req.id,
     ip: auditIp(req),
-    meta: { imagesRemoved },
+    meta: { imagesQueued },
   });
   res.clearCookie('ty_session', { ...sessionCookieOptions, maxAge: undefined });
   res.status(204).end();
+  void processImageDeletions();
 };
 
 export const exportAccountData = async (req: AuthRequest, res: Response) => {

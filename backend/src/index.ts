@@ -93,6 +93,7 @@ import { requestLogger } from './middleware/requestLogger';
 import { logger } from './config/logger';
 import prisma from './config/prisma';
 import { getHealth } from './controllers/healthController';
+import { processImageDeletions } from './services/imageDeletionService';
 
 import { getDraft, saveDraft } from './controllers/draftController';
 import { requestPasswordReset, resetPassword } from './controllers/passwordResetController';
@@ -147,7 +148,7 @@ const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['X-Request-Id', 'X-Next-Cursor'],
+  exposedHeaders: ['X-Request-Id', 'X-Next-Cursor', 'X-Unread-Count'],
   credentials: true,
 };
 
@@ -362,6 +363,9 @@ app.use(globalErrorHandler);
 export default app;
 
 if (process.env.NODE_ENV !== 'test') {
+  void processImageDeletions();
+  const imageCleanup = setInterval(() => void processImageDeletions(), 60_000);
+  imageCleanup.unref();
   const server = app.listen(port, () => {
     logger.info({ port, logLevel: logger.level }, `Backend listening on port ${port}`);
   });
@@ -369,6 +373,7 @@ if (process.env.NODE_ENV !== 'test') {
   // Containers are stopped with SIGTERM. Without this the process is killed
   // mid-request and Postgres connections are left dangling.
   const shutdown = (signal: string) => {
+    clearInterval(imageCleanup);
     logger.info({ signal }, 'Shutting down');
     server.close(async () => {
       await prisma.$disconnect().catch(() => {});

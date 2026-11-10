@@ -96,7 +96,9 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
   const id = req.params.id as string;
-  const { content } = req.body;
+  const { content, version } = req.body;
+  if (!Number.isInteger(version) || version < 1 || version >= 2_147_483_647)
+    return res.status(400).json({ error: 'Обновите страницу перед редактированием записи.' });
   const contentValidation = validateTextInput(content, 5_000);
   if (!contentValidation.ok) return res.status(400).json({ error: contentValidation.error });
 
@@ -105,6 +107,8 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
     if (!entry || entry.userId !== req.user.id) {
       return res.status(404).json({ error: 'Entry not found' });
     }
+    if (entry.version !== version)
+      return res.status(409).json({ error: 'Запись изменена в другой вкладке.' });
 
     const allowProvider = await canUseConfiguredAI(req.user.id);
     const riskLevel = await analyzeCrisisRisk(contentValidation.value, allowProvider);
@@ -113,8 +117,8 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
 
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.diaryEntry.update({
-        where: { id },
-        data: { content: contentValidation.value, riskLevel, tags, updatedAt: new Date() },
+        where: { id, userId: req.user!.id, version },
+        data: { content: contentValidation.value, riskLevel, tags, version: { increment: 1 } },
       });
       if (score === undefined) {
         await tx.sentimentTrend.deleteMany({ where: { diaryEntryId: id } });
@@ -132,6 +136,8 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
 
     res.json(updated);
   } catch (err) {
+    if (typeof err === 'object' && err && 'code' in err && err.code === 'P2025')
+      return res.status(409).json({ error: 'Запись изменена или удалена другим запросом.' });
     log.error({ err }, 'Diary update failed');
     res.status(500).json({ error: 'Error updating diary entry' });
   }

@@ -421,6 +421,81 @@ test('history keeps filters while paging and opens an older diary entry', async 
   await expect(page.locator('#entry-old-1')).toContainText('Старая запись из полной истории');
 });
 
+test('a conflicting diary edit retains the text and sends the original version', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let submitted: unknown;
+  await page.route('**/api/diary/versioned-entry', async (route) => {
+    if (route.request().method() === 'PUT') {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({ status: 409, json: { error: 'Запись изменена в другой вкладке.' } });
+    } else {
+      await route.fulfill({
+        json: { id: 'versioned-entry', content: 'Исходный текст', date: '2026-11-10', version: 4 },
+      });
+    }
+  });
+  await page.goto('/diary?entry=versioned-entry');
+  await page.getByRole('button', { name: 'Редактировать запись' }).click();
+  await page.getByLabel('Текст записи').fill('Мои несохранённые изменения');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Запись изменена в другой вкладке');
+  await expect(page.getByLabel('Текст записи')).toHaveValue('Мои несохранённые изменения');
+  expect(submitted).toEqual({ content: 'Мои несохранённые изменения', version: 4 });
+});
+
+test('notifications recover from failure and load older pages with a total unread count', async ({
+  page,
+}) => {
+  await mockApi(page);
+  let failure = true;
+  const cursors: (string | null)[] = [];
+  await page.route('**/api/notifications*', async (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor');
+    cursors.push(cursor);
+    if (failure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } });
+    await route.fulfill({
+      headers: { 'X-Unread-Count': '75', ...(cursor ? {} : { 'X-Next-Cursor': 'older' }) },
+      json: [
+        {
+          id: cursor || 'new',
+          title: cursor ? 'Старое уведомление' : 'Новое уведомление',
+          message: 'Сообщение',
+          date: '2026-11-10',
+          isRead: false,
+        },
+      ],
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Уведомления', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Не удалось загрузить уведомления');
+  failure = false;
+  await page.getByRole('button', { name: 'Повторить загрузку' }).click();
+  await expect(page.locator('.noti-dot')).toHaveText('75');
+  await expect(page.getByText('Новое уведомление', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Загрузить ещё' }).click();
+  await expect(page.getByText('Старое уведомление', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Загрузить ещё' })).toHaveCount(0);
+  expect(cursors.at(-1)).toBe('older');
+});
+
+test('mobile dashboard statistics fit with large numbers and wider text', async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto('/');
+  await page.locator('.stat-val').first().waitFor();
+  await page.locator('.stat-val').evaluateAll((nodes) => {
+    for (const node of nodes) node.textContent = '2147483647';
+  });
+  await page.addStyleTag({ content: '.stat-lbl { font-family: sans-serif; font-size: 18px; }' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const tile of await page.locator('.stat-tile').all()) {
+    expect(await tile.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  }
+});
+
 test('homework has an independent autosaved draft and keeps submitted work visible', async ({
   page,
 }) => {

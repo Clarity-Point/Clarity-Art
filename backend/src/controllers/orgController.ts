@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
+import { createLogger } from '../config/logger';
 import { AuthRequest } from '../middleware/auth';
 import { randomUUID } from 'node:crypto';
 import { organizationCreateSchema, organizationJoinSchema, peerSupportSchema } from '../schemas';
@@ -16,6 +17,8 @@ interface RiskStat {
   _count: number;
 }
 
+const log = createLogger('orgController');
+
 export const createOrg = async (req: AuthRequest, res: Response) => {
   // Authorization is enforced by the `isAdmin` middleware (fresh DB role check).
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -31,7 +34,8 @@ export const createOrg = async (req: AuthRequest, res: Response) => {
       },
     });
     res.status(201).json(org);
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Error creating organization');
     res.status(500).json({ error: 'Error creating organization' });
   }
 };
@@ -46,10 +50,15 @@ export const joinOrg = async (req: AuthRequest, res: Response) => {
     const org = await prisma.organization.findUnique({ where: { inviteCode } });
     if (!org) return res.status(404).json({ error: 'Invalid invite code' });
 
-    await prisma.user.update({
-      where: { id: req.user.id },
+    // Organization administration must not follow an ordinary membership invite.
+    const joined = await prisma.user.updateMany({
+      where: { id: req.user.id, OR: [{ role: { not: 'ORG_ADMIN' } }, { organizationId: org.id }] },
       data: { organizationId: org.id },
     });
+    if (!joined.count)
+      return res.status(409).json({
+        error: 'Сначала передайте права администратора текущей организации.',
+      });
 
     // Joining puts the person inside an employer-visible group. The org name is
     // deliberately not copied into the audit entry — only the ids, so the trail
@@ -63,7 +72,8 @@ export const joinOrg = async (req: AuthRequest, res: Response) => {
       ip: req.ip,
     });
     res.json({ message: `Successfully joined ${org.name}` });
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Error joining organization');
     res.status(500).json({ error: 'Error joining organization' });
   }
 };
@@ -78,7 +88,16 @@ export const leaveOrg = async (req: AuthRequest, res: Response) => {
     return res.status(409).json({ error: 'Сначала передайте права администратора организации' });
   }
   const previousOrg = user?.organizationId ?? undefined;
-  await prisma.user.update({ where: { id: req.user.id }, data: { organizationId: null } });
+  const left = await prisma.user.updateMany({
+    where: {
+      id: req.user.id,
+      role: { not: 'ORG_ADMIN' },
+      organizationId: user?.organizationId ?? null,
+    },
+    data: { organizationId: null },
+  });
+  if (!left.count)
+    return res.status(409).json({ error: 'Участие в организации изменилось. Обновите страницу.' });
   recordAudit({
     action: 'org.left',
     actorId: req.user.id,
@@ -192,7 +211,8 @@ export const getOrgStats = async (req: AuthRequest, res: Response) => {
       hrRecommendations: generateHRRecommendations(chatStats),
       executiveSummary: generateExecutiveSummary(chatStats),
     });
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Error fetching organization aggregates');
     res.status(500).json({ error: 'Error fetching organization aggregates' });
   }
 };
@@ -246,7 +266,8 @@ export const getPeerSupport = async (req: AuthRequest, res: Response) => {
       take: 20,
     });
     res.json(messages);
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Error fetching peer support');
     res.status(500).json({ error: 'Error fetching peer support' });
   }
 };
@@ -271,7 +292,8 @@ export const postPeerSupport = async (req: AuthRequest, res: Response) => {
       },
     });
     res.status(201).json(msg);
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Error posting peer support');
     res.status(500).json({ error: 'Error posting peer support' });
   }
 };

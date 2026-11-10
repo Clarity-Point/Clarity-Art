@@ -141,6 +141,7 @@ model UserChallenge {
 }
 
 model DiaryEntry {
+  version        Int             @default(1)
   id             String          @id @default(uuid())
   userId         String
   content        String
@@ -246,10 +247,11 @@ model Submission {
   submissionDate   DateTime @default(now())
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  homework         Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  homework         Homework @relation(fields: [homeworkId], references: [id], onDelete: NoAction)
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, homeworkId])
+  @@index([userId, submissionDate, id])
 }
 
 model CourseProgress {
@@ -263,7 +265,7 @@ model CourseProgress {
   lastAccessed     DateTime @default(now())
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  course           Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course           Course   @relation(fields: [courseId], references: [id], onDelete: NoAction)
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, courseId])
@@ -314,6 +316,7 @@ model Notification {
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead, date])
+  @@index([userId, date, id])
 }
 
 model PeerSupportMessage {
@@ -397,4 +400,12 @@ model MoodCheckIn {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, day])
+}
+
+// Survives account deletion so filesystem failures can be retried after restart.
+model ImageDeletion {
+  storageKey    String   @id
+  nextAttemptAt DateTime @default(now())
+
+  @@index([nextAttemptAt])
 }

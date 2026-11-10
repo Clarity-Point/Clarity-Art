@@ -27,6 +27,10 @@ export async function readStoredImage(key: string) {
 }
 
 export async function removeStoredImage(key: string) {
-  if (!/^[a-f0-9-]+\.(?:jpg|png|webp)$/.test(key)) return;
-  await unlink(path.join(storageRoot, key)).catch(() => undefined);
+  if (!/^[a-f0-9-]+\.(?:jpg|png|webp)$/.test(key)) throw new Error('Invalid image key');
+  try {
+    await unlink(path.join(storageRoot, key));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
