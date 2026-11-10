@@ -2,18 +2,13 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { createLogger } from '../config/logger';
 import { AuthRequest } from '../middleware/auth';
-import { z } from 'zod';
-
-const pageSchema = z.object({
-  cursor: z.string().uuid().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+import { pageQuerySchema } from '../schemas';
 
 const log = createLogger('notificationController');
 
 export const getNotifications = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  const query = pageSchema.safeParse(req.query);
+  const query = pageQuerySchema.safeParse(req.query);
   if (!query.success) return res.status(400).json({ error: 'Некорректная страница уведомлений' });
   const { limit, cursor } = query.data;
   try {

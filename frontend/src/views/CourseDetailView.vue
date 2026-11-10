@@ -36,6 +36,9 @@
 
     <div class="page course-body-grid">
       <div class="course-main stack">
+        <p v-if="course.archivedAt" role="status">
+          Курс в архиве. Материалы, задания и ваш прогресс остаются доступны.
+        </p>
         <section class="card">
           <div class="section-head"><h2 class="section-title">О курсе</h2></div>
           <p class="course-description">{{ course.description }}</p>
@@ -179,7 +182,7 @@
         <section class="card progress-panel">
           <div class="section-head"><h2 class="section-title">Ваш прогресс</h2></div>
           <div class="progress-big">
-            <span :style="{ width: currentCourseProgress + '%' }"></span>
+            <span :style="{ transform: `scaleX(${currentCourseProgress / 100})` }"></span>
           </div>
           <p class="muted progress-hint">
             {{ progressHint }}
@@ -651,10 +654,12 @@ watch(
 }
 .progress-big > span {
   display: block;
+  width: 100%;
   height: 100%;
   background: var(--primary-color);
   border-radius: var(--radius-full);
-  transition: width var(--transition);
+  transform-origin: left;
+  transition: transform var(--transition);
 }
 .progress-hint {
   margin: 0;

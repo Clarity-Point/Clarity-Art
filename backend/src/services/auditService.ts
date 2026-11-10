@@ -35,6 +35,8 @@ export type AuditAction =
   | 'org.left'
   | 'org.invite_rotated'
   | 'org.created'
+  | 'org.admin_transferred'
+  | 'admin.course_archived'
   | 'content.diary_deleted'
   | 'admin.course_deleted'
   | 'admin.submission_graded';

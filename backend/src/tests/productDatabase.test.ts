@@ -256,7 +256,7 @@ describe.runIf(process.env.RUN_DATABASE_TESTS === 'true')(
           await request(app)
             .post(`/api/admin/reports/${row.id}/resolve`)
             .set('Cookie', cookie(admin))
-            .send({ action: 'hide' })
+            .send({ action: 'hide', version: 1 })
         ).status,
       ).toBe(204);
       expect(
@@ -280,6 +280,7 @@ describe.runIf(process.env.RUN_DATABASE_TESTS === 'true')(
           await request(app)
             .post(`/api/admin/gallery/${imageId}/restore`)
             .set('Cookie', cookie(admin))
+            .send({ version: 2 })
         ).status,
       ).toBe(204);
     });

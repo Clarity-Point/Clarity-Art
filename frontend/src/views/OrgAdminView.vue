@@ -179,6 +179,41 @@
         {{ isRotatingCode ? 'Обновляем…' : 'Сменить код' }}
       </button>
     </section>
+    <section
+      v-if="authStore.user?.role === 'ORG_ADMIN' && !loading && !loadError"
+      class="card stack transfer-card"
+    >
+      <h2 class="section-title">Передать управление организацией</h2>
+      <p>
+        Новый администратор должен уже состоять в вашей организации. После передачи вы останетесь
+        обычным участником и сможете выйти из организации в профиле.
+      </p>
+      <form class="stack" @submit.prevent="transferAdmin">
+        <label for="successor-email">Email нового администратора</label>
+        <input
+          id="successor-email"
+          type="email"
+          v-model="successorEmail"
+          autocomplete="off"
+          maxlength="254"
+          required
+          :disabled="transferring"
+        />
+        <label for="transfer-password">Ваш текущий пароль</label>
+        <input
+          id="transfer-password"
+          type="password"
+          v-model="transferPassword"
+          autocomplete="current-password"
+          required
+          :disabled="transferring"
+        />
+        <p v-if="transferError" role="alert">{{ transferError }}</p>
+        <button class="btn-outline" :disabled="transferring">
+          {{ transferring ? 'Передаём права…' : 'Передать права администратора' }}
+        </button>
+      </form>
+    </section>
   </div>
 </template>
 
@@ -187,10 +222,46 @@ import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
 import SimpleLineChart from '@/components/SimpleLineChart.vue';
+import { useAuthStore } from '@/stores/authStore';
+import { useRouter } from 'vue-router';
 import { useToastStore } from '@/stores/toastStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const toastStore = useToastStore();
+const authStore = useAuthStore();
+const router = useRouter();
+const successorEmail = ref(''),
+  transferPassword = ref(''),
+  transferError = ref('');
+const transferring = ref(false);
+async function transferAdmin() {
+  if (
+    transferring.value ||
+    !window.confirm(
+      `Передать управление участнику ${successorEmail.value}? Вы потеряете права администратора.`,
+    )
+  )
+    return;
+  transferring.value = true;
+  transferError.value = '';
+  try {
+    await axios.post(`${API_URL}/org/transfer-admin`, {
+      email: successorEmail.value,
+      password: transferPassword.value,
+    });
+    if (authStore.user) authStore.user.role = 'USER';
+    await authStore.fetchProfile();
+    toastStore.success('Права переданы. Вы остались участником организации.');
+    await router.replace('/');
+  } catch (cause) {
+    transferError.value = axios.isAxiosError(cause)
+      ? cause.response?.data?.error || 'Не удалось передать права. Проверьте соединение.'
+      : 'Не удалось передать права.';
+  } finally {
+    transferPassword.value = '';
+    transferring.value = false;
+  }
+}
 
 interface RiskStat {
   riskLevel: string;
@@ -350,7 +421,12 @@ const riskIconStyle = (level: string) => {
   margin-bottom: var(--space-5);
 }
 
+.transfer-card {
+  max-width: 720px;
+  margin-top: var(--space-5);
+}
 .privacy-notice {
+  margin-bottom: var(--space-5);
   display: flex;
   align-items: flex-start;
   gap: var(--space-4);

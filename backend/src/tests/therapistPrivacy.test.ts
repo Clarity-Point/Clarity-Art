@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { findMany } = vi.hoisted(() => ({ findMany: vi.fn() }));
+const { findMany, count } = vi.hoisted(() => ({ findMany: vi.fn(), count: vi.fn() }));
 
 vi.mock('../config/prisma', () => ({
-  default: { user: { findMany } },
+  default: { user: { findMany, count } },
 }));
 
 import { getPatients } from '../controllers/therapistController';
@@ -13,10 +13,14 @@ describe('therapist patient privacy', () => {
 
   it('queries only the patient fields used by the therapist UI', async () => {
     findMany.mockResolvedValue([]);
+    count.mockResolvedValue(0);
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
 
-    await getPatients({ user: { id: 'therapist-1' } } as never, { json, status } as never);
+    await getPatients(
+      { user: { id: 'therapist-1' }, query: {} } as never,
+      { json, status, setHeader: vi.fn() } as never,
+    );
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({

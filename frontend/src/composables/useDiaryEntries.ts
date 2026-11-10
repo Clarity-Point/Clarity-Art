@@ -1,5 +1,7 @@
-import { ref, computed } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import { useUserProfileStore, type DiaryEntry } from '@/stores/userProfileStore';
+import { useAuthStore } from '@/stores/authStore';
+import { onBeforeRouteLeave } from 'vue-router';
 import { storeToRefs } from 'pinia';
 
 /**
@@ -26,9 +28,35 @@ export function useDiaryEntries() {
   // --- Editing State & Logic ---
   const editingEntryId = ref<string | null>(null);
   const currentEditText = ref<string>('');
+  const originalEditText = ref('');
+  const auth = useAuthStore();
+  watch(
+    () => auth.user?.id,
+    () => {
+      editingEntryId.value = null;
+      currentEditText.value = '';
+      originalEditText.value = '';
+    },
+  );
+  const hasUnsavedEdit = computed(
+    () => !!editingEntryId.value && currentEditText.value !== originalEditText.value,
+  );
+  const confirmDiscardEdit = () =>
+    !hasUnsavedEdit.value ||
+    window.confirm('Изменения записи не сохранены. Продолжить и потерять этот текст?');
+  onBeforeRouteLeave(confirmDiscardEdit);
+  const beforeUnload = (event: BeforeUnloadEvent) => {
+    if (hasUnsavedEdit.value) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  };
+  window.addEventListener('beforeunload', beforeUnload);
+  onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload));
 
   const startEdit = (entry: DiaryEntry) => {
-    if (isSavingEdit.value) return;
+    if (isSavingEdit.value || !confirmDiscardEdit()) return;
+    originalEditText.value = entry.text;
     editingEntryId.value = entry.id;
     currentEditText.value = entry.text;
     editVersion = entry.version;
@@ -64,7 +92,7 @@ export function useDiaryEntries() {
   };
 
   const cancelEdit = () => {
-    if (isSavingEdit.value) return;
+    if (isSavingEdit.value || !confirmDiscardEdit()) return;
     editingEntryId.value = null;
     currentEditText.value = '';
   };
@@ -80,8 +108,8 @@ export function useDiaryEntries() {
       return;
     }
     if (editingEntryId.value === entryId) {
-      // If deleting the entry currently being edited
-      cancelEdit();
+      editingEntryId.value = null;
+      currentEditText.value = '';
     }
   };
   // --- End Editing State & Logic ---

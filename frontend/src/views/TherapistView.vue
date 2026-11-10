@@ -11,7 +11,7 @@
       <div class="stat-tile">
         <span class="stat-ic"><Icon name="users" :size="20" /></span>
         <div>
-          <div class="stat-val">{{ patients.length }}</div>
+          <div class="stat-val">{{ patientTotal }}</div>
           <div class="stat-lbl">подопечных</div>
         </div>
       </div>
@@ -26,18 +26,18 @@
       </div>
     </section>
 
+    <form class="stack list-filters" @submit.prevent="fetchPatients()">
+      <label for="patient-search">Поиск подопечного по имени или email</label>
+      <input id="patient-search" v-model="patientSearch" maxlength="120" :disabled="isLoading" />
+      <button class="btn-outline" :disabled="isLoading">Найти подопечного</button>
+    </form>
+    <p v-if="loadError" role="alert">
+      {{ loadError }}
+      <button class="btn-outline" :disabled="isLoading" @click="fetchPatients()">Повторить</button>
+    </p>
     <div v-if="isLoading" class="empty-state">
       <span class="spinner" aria-hidden="true"></span>
       <p>Загружаем список подопечных…</p>
-    </div>
-
-    <div v-else-if="loadError" class="empty-state">
-      <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
-      <p>{{ loadError }}</p>
-      <button class="btn-outline" @click="fetchPatients">
-        <Icon name="refresh-cw" :size="16" />
-        Повторить
-      </button>
     </div>
 
     <div v-else-if="patients.length" class="grid grid-auto">
@@ -91,6 +91,15 @@
       <span class="empty-icon"><Icon name="users" :size="32" /></span>
       <p>Пока нет подопечных, закреплённых за вами.</p>
     </div>
+
+    <button
+      v-if="patientCursor"
+      class="btn-outline"
+      :disabled="isLoading"
+      @click="fetchPatients(true)"
+    >
+      Загрузить ещё подопечных
+    </button>
 
     <Teleport to="body">
       <div
@@ -202,9 +211,11 @@ useFocusScope(
 const isLoading = ref(false);
 const loadError = ref('');
 
-const urgentCount = computed(
-  () => patients.value.filter((p) => (p.profile?.attentionScore || 0) > 50).length,
-);
+const urgentCount = ref(0);
+const patientTotal = ref(0);
+const patientSearch = ref('');
+const patientCursor = ref<string | null>(null);
+let appliedSearch = '';
 
 const riskBadge = (level: string) => {
   if (level === 'high') return 'badge-danger';
@@ -214,21 +225,33 @@ const riskBadge = (level: string) => {
 
 const formatEntryDate = (value: string) => new Date(value).toLocaleDateString('ru-RU');
 
-const fetchPatients = async () => {
+const fetchPatients = async (more = false) => {
+  if (isLoading.value) return;
+  if (!more) {
+    appliedSearch = patientSearch.value.trim();
+    patientCursor.value = null;
+  }
   isLoading.value = true;
   loadError.value = '';
+  selectedPatient.value = null;
   try {
-    const response = await axios.get(`${API_URL}/therapist/patients`);
-    patients.value = Array.isArray(response.data) ? response.data : [];
+    const response = await axios.get(`${API_URL}/therapist/patients`, {
+      params: { q: appliedSearch, ...(more ? { cursor: patientCursor.value } : {}) },
+    });
+    const rows: Patient[] = Array.isArray(response.data) ? response.data : [];
+    patients.value = more
+      ? [
+          ...patients.value,
+          ...rows.filter((row) => !patients.value.some((old) => old.id === row.id)),
+        ]
+      : rows;
+    patientCursor.value = response.headers['x-next-cursor'] || null;
+    patientTotal.value = Number(response.headers['x-total-count'] ?? rows.length);
+    urgentCount.value = Number(
+      response.headers['x-attention-count'] ??
+        rows.filter((row) => (row.profile?.attentionScore || 0) > 50).length,
+    );
   } catch {
-    console.error('Error fetching patients');
-    /*
-     * Silently keeping the empty list made a network failure indistinguishable
-     * from "you have no patients" — the single most misleading outcome on this
-     * screen, because the clinician would conclude there is nothing to follow
-     * up on. Surface the failure with a retry instead.
-     */
-    patients.value = [];
     loadError.value = 'Не удалось загрузить список подопечных. Проверьте соединение.';
   } finally {
     isLoading.value = false;
@@ -243,6 +266,11 @@ onMounted(fetchPatients);
 </script>
 
 <style scoped>
+.list-filters {
+  max-width: 40rem;
+  margin-block: var(--space-5);
+}
+
 .page-head {
   margin-bottom: var(--space-5);
 }
@@ -289,7 +317,6 @@ onMounted(fetchPatients);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  border-left: 4px solid var(--primary-color);
 }
 
 .patient-header {

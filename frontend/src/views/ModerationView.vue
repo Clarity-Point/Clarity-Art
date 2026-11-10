@@ -68,7 +68,7 @@ interface Report {
   status: string;
   createdAt: string;
   imageUrl?: string;
-  image: { prompt: string; result: string; moderationStatus: string };
+  image: { prompt: string; result: string; moderationStatus: string; moderationVersion: number };
 }
 const API = import.meta.env.VITE_API_URL || '/api';
 const items = ref<Report[]>([]),
@@ -104,7 +104,10 @@ async function act(item: Report, action: string) {
     return;
   busy.value = true;
   try {
-    await axios.post(`${API}/admin/reports/${item.id}/resolve`, { action });
+    await axios.post(`${API}/admin/reports/${item.id}/resolve`, {
+      action,
+      version: item.image.moderationVersion,
+    });
     await load();
   } catch {
     error.value = 'Не удалось сохранить решение. Обновите список.';
@@ -116,10 +119,15 @@ async function restore(item: Report) {
   if (busy.value) return;
   busy.value = true;
   try {
-    await axios.post(`${API}/admin/gallery/${item.imageId}/restore`);
+    await axios.post(`${API}/admin/gallery/${item.imageId}/restore`, {
+      version: item.image.moderationVersion,
+    });
     await load();
-  } catch {
-    error.value = 'Не удалось восстановить публикацию.';
+  } catch (cause) {
+    error.value =
+      axios.isAxiosError(cause) && cause.response?.status === 409
+        ? 'Публикация изменена другим модератором. Обновите список.'
+        : 'Не удалось восстановить публикацию.';
   } finally {
     busy.value = false;
   }

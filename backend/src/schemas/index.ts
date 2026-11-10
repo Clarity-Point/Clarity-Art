@@ -83,3 +83,8 @@ export const healthMetricSchema = z
   .refine((value) => Object.values(value).some((item) => item !== undefined), {
     message: 'At least one health metric is required',
   });
+
+export const pageQuerySchema = z.object({
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});

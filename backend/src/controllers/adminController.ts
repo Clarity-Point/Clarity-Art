@@ -2,7 +2,9 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createLogger } from '../config/logger';
-import { gradeSubmissionSchema } from '../schemas';
+import { z } from 'zod';
+import { Prisma } from '@prisma/client';
+import { gradeSubmissionSchema, pageQuerySchema } from '../schemas';
 import { recordAudit } from '../services/auditService';
 
 const log = createLogger('adminController');
@@ -225,17 +227,46 @@ export const getStats = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const submissionPageSchema = pageQuerySchema.extend({
+  status: z.enum(['all', 'pending', 'graded']).default('all'),
+  q: z.string().trim().max(120).default(''),
+});
 export const getSubmissions = async (req: AuthRequest, res: Response) => {
-  try {
-    const submissions = await prisma.submission.findMany({
-      include: {
-        user: { select: { email: true } },
-        homework: { select: { title: true } },
-      },
-      orderBy: { submissionDate: 'desc' },
-    });
-
-    const formatted = submissions.map((s) => ({
+  const query = submissionPageSchema.safeParse(req.query);
+  if (!query.success) return res.status(400).json({ error: 'Некорректный фильтр работ' });
+  const { limit, cursor, status, q } = query.data;
+  const where: Prisma.SubmissionWhereInput = {
+    ...(status === 'pending'
+      ? { grade: null }
+      : status === 'graded'
+        ? { grade: { not: null } }
+        : {}),
+    ...(q
+      ? {
+          OR: [
+            { user: { email: { contains: q, mode: 'insensitive' } } },
+            { homework: { title: { contains: q, mode: 'insensitive' } } },
+          ],
+        }
+      : {}),
+  };
+  const [submissions, total, pending] = await Promise.all([
+    prisma.submission.findMany({
+      where,
+      include: { user: { select: { email: true } }, homework: { select: { title: true } } },
+      orderBy: [{ submissionDate: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    }),
+    prisma.submission.count(),
+    prisma.submission.count({ where: { grade: null } }),
+  ]);
+  res.setHeader('X-Total-Count', String(total));
+  res.setHeader('X-Pending-Count', String(pending));
+  if (submissions.length > limit) res.setHeader('X-Next-Cursor', submissions[limit - 1].id);
+  res.json(
+    submissions.slice(0, limit).map((s) => ({
+      id: s.id,
       userId: s.userId,
       homeworkId: s.homeworkId,
       userEmail: s.user.email,
@@ -244,12 +275,8 @@ export const getSubmissions = async (req: AuthRequest, res: Response) => {
       submissionDate: s.submissionDate,
       grade: s.grade,
       analysisText: s.analysisText,
-    }));
-
-    res.json(formatted);
-  } catch {
-    res.status(500).json({ error: 'Error fetching submissions' });
-  }
+    })),
+  );
 };
 
 export const gradeSubmission = async (req: AuthRequest, res: Response) => {
@@ -294,4 +321,24 @@ export const updateLesson = async (req: AuthRequest, res: Response) => {
     data: { title, content },
   });
   res.status(changed.count ? 204 : 404).end();
+};
+
+export const setCourseArchive = async (req: AuthRequest, res: Response) => {
+  if (typeof req.body?.archived !== 'boolean')
+    return res.status(400).json({ error: 'Укажите статус архива' });
+  const archived = req.body.archived;
+  const id = req.params.id as string;
+  const result = await prisma.course.updateMany({
+    where: { id },
+    data: { archivedAt: archived ? new Date() : null },
+  });
+  if (!result.count) return res.status(404).json({ error: 'Курс не найден' });
+  recordAudit({
+    action: 'admin.course_archived',
+    actorId: req.user?.id,
+    subjectId: id,
+    meta: { archived },
+    outcome: 'success',
+  });
+  res.status(204).end();
 };

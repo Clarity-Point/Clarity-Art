@@ -2,6 +2,8 @@ import { Response } from 'express';
 import prisma from '../config/prisma';
 import { createLogger } from '../config/logger';
 import { AuthRequest } from '../middleware/auth';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { organizationCreateSchema, organizationJoinSchema, peerSupportSchema } from '../schemas';
 import { recordAudit } from '../services/auditService';
@@ -296,4 +298,73 @@ export const postPeerSupport = async (req: AuthRequest, res: Response) => {
     log.error({ err }, 'Error posting peer support');
     res.status(500).json({ error: 'Error posting peer support' });
   }
+};
+
+const transferSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(254),
+  password: z.string().min(1).max(1024),
+});
+export const transferOrgAdmin = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.sendStatus(401);
+  const body = transferSchema.safeParse(req.body);
+  if (!body.success)
+    return res.status(400).json({ error: 'Укажите email участника и текущий пароль' });
+  const actorId = req.user.id;
+  const actor = await prisma.user.findUnique({ where: { id: actorId } });
+  if (!actor || actor.role !== 'ORG_ADMIN' || !actor.organizationId)
+    return res.status(403).json({ error: 'Передать права может администратор своей организации' });
+  if (!(await bcrypt.compare(body.data.password, actor.password)))
+    return res.status(400).json({ error: 'Текущий пароль указан неверно' });
+  const target = await prisma.user.findFirst({
+    where: {
+      email: body.data.email,
+      organizationId: actor.organizationId,
+      role: 'USER',
+    },
+    select: { id: true },
+  });
+  if (!target)
+    return res.status(400).json({ error: 'Выберите обычного участника этой организации' });
+  const transferred = await prisma.$transaction(async (tx) => {
+    // Stable lock order serializes transfer, joining and leaving for both members.
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${actorId}, ${target.id}) ORDER BY id FOR UPDATE`;
+    const current = await tx.user.findFirst({
+      where: {
+        id: actorId,
+        role: 'ORG_ADMIN',
+        organizationId: actor.organizationId,
+        password: actor.password,
+      },
+    });
+    const successor = await tx.user.findFirst({
+      where: {
+        id: target.id,
+        role: 'USER',
+        organizationId: actor.organizationId,
+      },
+    });
+    if (!current || !successor) return false;
+    await tx.user.update({ where: { id: actorId }, data: { role: 'USER' } });
+    await tx.user.update({ where: { id: target.id }, data: { role: 'ORG_ADMIN' } });
+    await tx.notification.create({
+      data: {
+        userId: target.id,
+        title: 'Вам переданы права администратора',
+        message: 'Обновите страницу, чтобы открыть управление организацией.',
+      },
+    });
+    return true;
+  });
+  if (!transferred)
+    return res
+      .status(409)
+      .json({ error: 'Права или состав организации изменились. Обновите страницу.' });
+  recordAudit({
+    action: 'org.admin_transferred',
+    actorId,
+    subjectId: target.id,
+    meta: { organizationId: actor.organizationId },
+    outcome: 'success',
+  });
+  res.status(204).end();
 };

@@ -24,6 +24,7 @@ export interface RelatedHomework {
 }
 
 export interface Course {
+  archivedAt?: string | null;
   id: string;
   slug: string;
   title: string;
@@ -44,11 +45,13 @@ export const useCoursesStore = defineStore('courses', () => {
   const isLoading = ref(false);
   const errorMessage = ref('');
 
-  async function fetchCourses() {
+  async function fetchCourses(includeArchived = false) {
     isLoading.value = true;
     errorMessage.value = '';
     try {
-      const response = await axios.get(`${API_URL}/courses`);
+      const response = await axios.get(
+        `${API_URL}/${includeArchived ? 'admin/courses' : 'courses'}`,
+      );
       courses.value = response.data;
     } catch {
       console.error('Failed to fetch courses:');
@@ -87,7 +90,7 @@ export const useCoursesStore = defineStore('courses', () => {
       } else {
         await axios.post(`${API_URL}/admin/courses`, course);
       }
-      await fetchCourses();
+      await fetchCourses(true);
       return true;
     } catch {
       console.error('Failed to save course:');
@@ -98,7 +101,7 @@ export const useCoursesStore = defineStore('courses', () => {
   async function deleteCourse(id: string) {
     try {
       await axios.delete(`${API_URL}/admin/courses/${id}`);
-      await fetchCourses();
+      await fetchCourses(true);
       return { ok: true, error: '' };
     } catch (error) {
       const message = axios.isAxiosError(error)
@@ -110,32 +113,32 @@ export const useCoursesStore = defineStore('courses', () => {
 
   async function addModule(courseId: string, title: string) {
     await axios.post(`${API_URL}/admin/courses/${courseId}/modules`, { title });
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   async function deleteModule(id: string) {
     await axios.delete(`${API_URL}/admin/modules/${id}`);
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   async function addLesson(moduleId: string, title: string, content = '') {
     await axios.post(`${API_URL}/admin/modules/${moduleId}/lessons`, { title, content });
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   async function deleteLesson(id: string) {
     await axios.delete(`${API_URL}/admin/lessons/${id}`);
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   async function addHomework(courseId: string, title: string, description: string) {
     await axios.post(`${API_URL}/admin/courses/${courseId}/homework`, { title, description });
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   async function deleteHomework(id: string) {
     await axios.delete(`${API_URL}/admin/homework/${id}`);
-    await fetchCourses();
+    await fetchCourses(true);
   }
 
   return {

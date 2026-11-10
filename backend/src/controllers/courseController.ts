@@ -17,6 +17,7 @@ import { calculateCourseProgress } from '../services/courseProgressService';
  */
 export const getAllCourses = async (req: AuthRequest, res: Response) => {
   const courses = await prisma.course.findMany({
+    where: req.user?.role === 'ADMIN' ? {} : { archivedAt: null },
     include: {
       modules: {
         include: { lessons: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },

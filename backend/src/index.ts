@@ -39,6 +39,7 @@ import {
   deleteDiaryEntry,
 } from './controllers/diaryController';
 import {
+  setCourseArchive,
   createCourse,
   updateCourse,
   deleteCourse,
@@ -62,6 +63,7 @@ import { exportDiaryPDF } from './controllers/exportController';
 import { getMoodStats, getCorrelations } from './controllers/analyticsController';
 import { getChallenges, joinChallenge, completeChallenge } from './controllers/challengeController';
 import {
+  transferOrgAdmin,
   createOrg,
   joinOrg,
   getOrgStats,
@@ -148,7 +150,14 @@ const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['X-Request-Id', 'X-Next-Cursor', 'X-Unread-Count'],
+  exposedHeaders: [
+    'X-Request-Id',
+    'X-Next-Cursor',
+    'X-Unread-Count',
+    'X-Total-Count',
+    'X-Pending-Count',
+    'X-Attention-Count',
+  ],
   credentials: true,
 };
 
@@ -273,6 +282,7 @@ app.get('/api/ai/status', authenticateToken, getAIStatus);
 app.put('/api/profile/ai-consent', authenticateToken, updateAIConsent);
 
 // B2B Org
+app.post('/api/org/transfer-admin', authenticateToken, isOrgAdmin, authLimiter, transferOrgAdmin);
 app.post('/api/org/create', authenticateToken, isAdmin, createOrg);
 app.post('/api/org/join', authenticateToken, joinOrg);
 app.delete('/api/org/leave', authenticateToken, leaveOrg);
@@ -342,7 +352,9 @@ app.put('/api/notifications/:id/read', authenticateToken, markAsRead);
 
 // Admin Routes
 app.get('/api/admin/stats', authenticateToken, isAdmin, getStats);
+app.get('/api/admin/courses', authenticateToken, isAdmin, getAllCourses);
 app.post('/api/admin/courses', authenticateToken, isAdmin, createCourse);
+app.put('/api/admin/courses/:id/archive', authenticateToken, isAdmin, setCourseArchive);
 app.put('/api/admin/courses/:id', authenticateToken, isAdmin, updateCourse);
 app.delete('/api/admin/courses/:id', authenticateToken, isAdmin, deleteCourse);
 app.post('/api/admin/courses/:courseId/modules', authenticateToken, isAdmin, createModule);

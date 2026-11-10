@@ -605,7 +605,11 @@ test('moderator reviews a report and can restore the blocked work', async ({ pag
                 {
                   ...report,
                   status: blocked ? 'ACTIONED' : 'PENDING',
-                  image: { ...report.image, moderationStatus: blocked ? 'BLOCKED' : 'VISIBLE' },
+                  image: {
+                    ...report.image,
+                    moderationStatus: blocked ? 'BLOCKED' : 'VISIBLE',
+                    moderationVersion: blocked ? 2 : 1,
+                  },
                 },
               ],
         nextCursor: null,
@@ -613,11 +617,12 @@ test('moderator reviews a report and can restore the blocked work', async ({ pag
     });
   });
   await page.route('**/api/admin/reports/report-1/resolve', async (route) => {
-    expect(route.request().postDataJSON()).toEqual({ action: 'hide' });
+    expect(route.request().postDataJSON()).toEqual({ action: 'hide', version: 1 });
     blocked = true;
     await route.fulfill({ status: 204 });
   });
   await page.route('**/api/admin/gallery/work-1/restore', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ version: 2 });
     blocked = false;
     await route.fulfill({ status: 204 });
   });
@@ -634,4 +639,155 @@ test('moderator reviews a report and can restore the blocked work', async ({ pag
   await page.getByLabel('Статус', { exact: true }).selectOption('ACTIONED');
   await page.getByRole('button', { name: 'Восстановить публикацию' }).click();
   await expect.poll(() => blocked).toBe(false);
+});
+
+test('an administrator can archive and restore a course without deleting it', async ({ page }) => {
+  await mockApi(page);
+  let archived = false;
+  await page.route('**/api/admin/courses', (route) =>
+    route.fulfill({ json: [{ ...exampleCourse, archivedAt: archived ? '2026-11-11' : null }] }),
+  );
+  await page.route('**/api/admin/courses/audit-course/archive', async (route) => {
+    archived = route.request().postDataJSON().archived;
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto('/admin');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'В архив', exact: true }).click();
+  await expect(page.getByText('В архиве', { exact: true })).toBeVisible();
+  expect(archived).toBe(true);
+  await page.getByRole('button', { name: 'Вернуть в каталог' }).click();
+  await expect(page.getByText('В архиве', { exact: true })).toHaveCount(0);
+  expect(archived).toBe(false);
+});
+
+test('organization ownership transfer requires confirmation and refreshes the role', async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 320, height: 900 });
+  let transferred = false;
+  await page.route('**/api/profile', (route) =>
+    route.fulfill({
+      json: {
+        id: 'org-manager',
+        name: 'Администратор',
+        role: transferred ? 'USER' : 'ORG_ADMIN',
+        organizationId: 'org-1',
+      },
+    }),
+  );
+  await page.route('**/api/org/transfer-admin', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({
+      email: 'successor@example.test',
+      password: 'current-password',
+    });
+    transferred = true;
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto('/org-admin');
+  await expect(page.getByLabel('Email нового администратора')).toBeVisible();
+  const audit = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+    .analyze();
+  expect(audit.violations.map((item) => item.id)).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByLabel('Email нового администратора').fill('successor@example.test');
+  await page.getByLabel('Ваш текущий пароль').fill('current-password');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Передать права администратора' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole('status').filter({ hasText: 'Права переданы' })).toBeVisible();
+  expect(transferred).toBe(true);
+});
+
+test('submission filters survive pagination and show server totals', async ({ page }) => {
+  await mockApi(page);
+  const queries: URL[] = [];
+  await page.route('**/api/admin/submissions*', (route) => {
+    const url = new URL(route.request().url());
+    queries.push(url);
+    const older = url.searchParams.has('cursor');
+    return route.fulfill({
+      headers: {
+        'X-Total-Count': '150',
+        'X-Pending-Count': '80',
+        ...(older ? {} : { 'X-Next-Cursor': 'next' }),
+      },
+      json: [
+        {
+          userId: older ? 'older' : 'new',
+          homeworkId: 'task',
+          userEmail: older ? 'older@example.test' : 'new@example.test',
+          homeworkTitle: 'Практика',
+          submissionDate: '2026-11-11',
+          grade: null,
+        },
+      ],
+    });
+  });
+  await page.goto('/admin');
+  await page.getByRole('button', { name: /Проверка заданий/ }).click();
+  await page.getByLabel('Поиск по email или заданию').fill('Практика');
+  await page.getByLabel('Статус проверки').selectOption('pending');
+  await page.getByRole('button', { name: 'Найти работы' }).click();
+  await expect(page.getByText('new@example.test', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Загрузить ещё работы' }).click();
+  await expect(page.getByText('older@example.test', { exact: true })).toBeVisible();
+  await expect(page.locator('.stat-val').nth(1)).toHaveText('150');
+  expect(queries.at(-1)?.searchParams.get('q')).toBe('Практика');
+  expect(queries.at(-1)?.searchParams.get('status')).toBe('pending');
+  expect(queries.at(-1)?.searchParams.get('cursor')).toBe('next');
+});
+
+test('therapist search pages consenting patients with complete counts', async ({ page }) => {
+  await mockApi(page);
+  const queries: URL[] = [];
+  await page.route('**/api/therapist/patients*', (route) => {
+    const url = new URL(route.request().url());
+    queries.push(url);
+    const older = url.searchParams.has('cursor');
+    return route.fulfill({
+      headers: {
+        'X-Total-Count': '80',
+        'X-Attention-Count': '12',
+        ...(older ? {} : { 'X-Next-Cursor': 'next' }),
+      },
+      json: [
+        {
+          id: older ? 'second' : 'first',
+          email: 'fixture@example.test',
+          profile: { name: older ? 'Второй участник' : 'Первый участник', attentionScore: 0 },
+        },
+      ],
+    });
+  });
+  await page.goto('/therapist');
+  await page.getByLabel('Поиск подопечного по имени или email').fill('участник');
+  await page.getByRole('button', { name: 'Найти подопечного' }).click();
+  await expect(page.getByRole('heading', { name: 'Первый участник' })).toBeVisible();
+  await page.getByRole('button', { name: 'Загрузить ещё подопечных' }).click();
+  await expect(page.getByRole('heading', { name: 'Второй участник' })).toBeVisible();
+  await expect(page.locator('.stat-val').first()).toHaveText('80');
+  expect(queries.at(-1)?.searchParams.get('q')).toBe('участник');
+  expect(queries.at(-1)?.searchParams.get('cursor')).toBe('next');
+});
+
+test('leaving an unsaved diary edit requires an explicit discard', async ({ page }) => {
+  await mockApi(page);
+  await page.route('**/api/diary/unsaved', (route) =>
+    route.fulfill({
+      json: { id: 'unsaved', version: 1, content: 'Исходный текст', date: '2026-11-11' },
+    }),
+  );
+  await page.goto('/diary?entry=unsaved');
+  await page.getByRole('button', { name: 'Редактировать запись' }).click();
+  await page.getByLabel('Текст записи').fill('Несохранённая запись');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.locator('.sb-item[href="/history"]').click();
+  await expect(page).toHaveURL(/\/diary\?entry=unsaved$/);
+  await expect(page.getByLabel('Текст записи')).toHaveValue('Несохранённая запись');
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('.sb-item[href="/history"]').click();
+  await expect(page).toHaveURL(/\/history$/);
 });

@@ -99,6 +99,7 @@ model ImageAnalysis {
   cost                 Float           @default(0)
   user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   likedBy              ImageLike[]
+  moderationVersion    Int             @default(1)
   moderationStatus     String          @default("VISIBLE")
   reports              GalleryReport[]
   hiddenBy             HiddenImage[]
@@ -189,6 +190,7 @@ model ChatMessage {
 }
 
 model Course {
+  archivedAt     DateTime?
   id             String           @id @default(uuid())
   slug           String           @unique
   category       String
@@ -252,6 +254,7 @@ model Submission {
 
   @@unique([userId, homeworkId])
   @@index([userId, submissionDate, id])
+  @@index([submissionDate, id])
 }
 
 model CourseProgress {

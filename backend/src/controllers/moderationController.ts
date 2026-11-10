@@ -73,6 +73,7 @@ export const listReports = async (req: AuthRequest, res: Response) => {
           prompt: true,
           result: true,
           moderationStatus: true,
+          moderationVersion: true,
           imageStorageKey: true,
           imageUrl: true,
         },
@@ -90,15 +91,31 @@ export const listReports = async (req: AuthRequest, res: Response) => {
     nextCursor: reports.length > 30 ? reports[29].id : null,
   });
 };
+const versionSchema = z.number().int().min(1).max(2_147_483_646);
 export const resolveReport = async (req: AuthRequest, res: Response) => {
   if (!req.user || !['hide', 'dismiss'].includes(req.body?.action))
     return res.status(400).json({ error: 'Выберите решение' });
+  const version = versionSchema.safeParse(req.body.version);
+  if (!version.success)
+    return res.status(400).json({ error: 'Обновите список перед сохранением решения' });
   const action = req.body.action as 'hide' | 'dismiss';
   const id = req.params.id as string;
   const actorId = req.user.id;
   const done = await prisma.$transaction(async (tx) => {
     const report = await tx.galleryReport.findUnique({ where: { id } });
-    if (!report || report.status !== 'PENDING') return false;
+    if (!report) return false;
+    // Lock the publication first: decisions on different reports share this lock.
+    await tx.$queryRaw`SELECT id FROM "ImageAnalysis" WHERE id = ${report.imageId} FOR UPDATE`;
+    const fresh = await tx.galleryReport.findUnique({ where: { id } });
+    if (!fresh || fresh.status !== 'PENDING') return false;
+    const changed = await tx.imageAnalysis.updateMany({
+      where: { id: report.imageId, moderationVersion: version.data },
+      data: {
+        moderationVersion: { increment: 1 },
+        ...(action === 'hide' ? { moderationStatus: 'BLOCKED' } : {}),
+      },
+    });
+    if (!changed.count) return false;
     const claimed = await tx.galleryReport.updateMany({
       where: { id, status: 'PENDING' },
       data: {
@@ -107,12 +124,9 @@ export const resolveReport = async (req: AuthRequest, res: Response) => {
         reviewedBy: actorId,
       },
     });
-    if (!claimed.count) return false;
+    if (!claimed.count)
+      throw Object.assign(new Error('Жалоба удалена. Обновите список.'), { status: 409 });
     if (action === 'hide') {
-      await tx.imageAnalysis.update({
-        where: { id: report.imageId },
-        data: { moderationStatus: 'BLOCKED' },
-      });
       await tx.galleryReport.updateMany({
         where: { imageId: report.imageId, status: 'PENDING' },
         data: { status: 'ACTIONED', reviewedAt: new Date(), reviewedBy: actorId },
@@ -131,9 +145,16 @@ export const resolveReport = async (req: AuthRequest, res: Response) => {
   res.status(204).end();
 };
 export const restoreImage = async (req: AuthRequest, res: Response) => {
+  const version = versionSchema.safeParse(req.body?.version);
+  if (!version.success)
+    return res.status(400).json({ error: 'Обновите список перед восстановлением' });
   const updated = await prisma.imageAnalysis.updateMany({
-    where: { id: req.params.id as string, moderationStatus: 'BLOCKED' },
-    data: { moderationStatus: 'VISIBLE' },
+    where: {
+      id: req.params.id as string,
+      moderationStatus: 'BLOCKED',
+      moderationVersion: version.data,
+    },
+    data: { moderationStatus: 'VISIBLE', moderationVersion: { increment: 1 } },
   });
   if (updated.count)
     recordAudit({
@@ -142,5 +163,9 @@ export const restoreImage = async (req: AuthRequest, res: Response) => {
       meta: { imageId: req.params.id as string },
       outcome: 'success',
     });
-  res.status(updated.count ? 204 : 404).end();
+  if (!updated.count)
+    return res
+      .status(409)
+      .json({ error: 'Публикация изменена другим модератором. Обновите список.' });
+  res.status(204).end();
 };

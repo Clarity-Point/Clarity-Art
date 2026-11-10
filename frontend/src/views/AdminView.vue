@@ -37,7 +37,7 @@
       <div class="stat-tile">
         <span class="stat-ic"><Icon name="file-text" :size="20" /></span>
         <div>
-          <div class="stat-val">{{ submissions.length }}</div>
+          <div class="stat-val">{{ submissionTotal }}</div>
           <div class="stat-lbl">сданных работ</div>
         </div>
       </div>
@@ -60,7 +60,14 @@
         </button>
       </div>
 
-      <div v-if="courses.length" class="card table-card">
+      <p v-if="coursesStore.isLoading" role="status">Загружаем курсы…</p>
+      <div v-else-if="coursesStore.errorMessage" role="alert">
+        <p>{{ coursesStore.errorMessage }}</p>
+        <button class="btn-outline" @click="coursesStore.fetchCourses(true)">
+          Повторить загрузку курсов
+        </button>
+      </div>
+      <div v-else-if="courses.length" class="card table-card">
         <div class="table-scroll">
           <table>
             <thead>
@@ -74,7 +81,9 @@
             <tbody>
               <tr v-for="course in courses" :key="course.id">
                 <td class="mono muted">{{ course.id }}</td>
-                <td class="cell-title">{{ course.title }}</td>
+                <td class="cell-title">
+                  {{ course.title }} <span v-if="course.archivedAt" class="chip">В архиве</span>
+                </td>
                 <td>
                   <span class="chip badge-primary">{{ categoryLabel(course.category) }}</span>
                 </td>
@@ -82,6 +91,13 @@
                   <div class="row table-actions">
                     <button @click="openCourseModal(course)" class="btn-outline btn-sm">
                       <Icon name="edit" :size="15" /> Редактировать
+                    </button>
+                    <button
+                      class="btn-outline btn-sm"
+                      :disabled="!!archiving"
+                      @click="toggleArchive(course)"
+                    >
+                      {{ course.archivedAt ? 'Вернуть в каталог' : 'В архив' }}
                     </button>
                     <button @click="removeCourse(course)" class="btn-ghost btn-sm danger-action">
                       <Icon name="trash" :size="15" /> Удалить
@@ -104,6 +120,28 @@
       <div class="section-head">
         <h2 class="section-title">Сданные работы</h2>
       </div>
+      <form class="stack list-filters" @submit.prevent="fetchSubmissions()">
+        <label for="submission-search">Поиск по email или заданию</label>
+        <input
+          id="submission-search"
+          v-model="submissionSearch"
+          maxlength="120"
+          :disabled="submissionsLoading"
+        />
+        <label for="submission-status">Статус проверки</label>
+        <select id="submission-status" v-model="submissionStatus" :disabled="submissionsLoading">
+          <option value="all">Все работы</option>
+          <option value="pending">Ожидают проверки</option>
+          <option value="graded">Проверены</option>
+        </select>
+        <button class="btn-outline" :disabled="submissionsLoading">Найти работы</button>
+      </form>
+      <p v-if="submissionsError" role="alert">
+        {{ submissionsError }}
+        <button class="btn-outline" :disabled="submissionsLoading" @click="fetchSubmissions()">
+          Повторить
+        </button>
+      </p>
 
       <div v-if="submissionsLoading" class="card table-card">
         <div class="table-scroll">
@@ -163,19 +201,18 @@
           </table>
         </div>
       </div>
-      <div v-else-if="submissionsError" class="empty-state">
-        <span class="empty-icon"><Icon name="alert-triangle" :size="32" /></span>
-        <p>{{ submissionsError }}</p>
-        <button class="btn-outline" @click="fetchSubmissions">
-          <Icon name="refresh-cw" :size="16" />
-          Повторить
-        </button>
-      </div>
-
       <div v-else class="empty-state">
         <span class="empty-icon"><Icon name="file-text" :size="32" /></span>
-        <p>Пока никто не сдавал задания. Как только появятся работы, вы увидите их здесь.</p>
+        <p>Работ по выбранным условиям пока нет.</p>
       </div>
+      <button
+        v-if="submissionCursor"
+        class="btn-outline"
+        :disabled="submissionsLoading"
+        @click="fetchSubmissions(true)"
+      >
+        Загрузить ещё работы
+      </button>
     </section>
 
     <Teleport to="body">
@@ -395,7 +432,7 @@
 
 <script setup lang="ts">
 import LessonEditor from '@/components/LessonEditor.vue';
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useCoursesStore, type Course, type CourseDraft } from '@/stores/coursesStore';
 import { storeToRefs } from 'pinia';
 import axios from 'axios';
@@ -462,7 +499,33 @@ useFocusScope(
   overlayBackground,
 );
 
-const pendingCount = computed(() => submissions.value.filter((s) => !s.grade).length);
+const pendingCount = ref(0);
+const submissionTotal = ref(0);
+const submissionCursor = ref<string | null>(null);
+const submissionSearch = ref('');
+const submissionStatus = ref('all');
+let appliedSubmissionFilter = { q: '', status: 'all' };
+const archiving = ref('');
+const toggleArchive = async (course: Course) => {
+  if (archiving.value) return;
+  if (
+    !course.archivedAt &&
+    !window.confirm('Убрать курс из каталога? Материалы и прогресс сохранятся.')
+  )
+    return;
+  archiving.value = course.id;
+  try {
+    await axios.put(`${API_URL}/admin/courses/${course.id}/archive`, {
+      archived: !course.archivedAt,
+    });
+    await coursesStore.fetchCourses(true);
+    toastStore.success(course.archivedAt ? 'Курс возвращён в каталог.' : 'Курс перенесён в архив.');
+  } catch {
+    toastStore.error('Не удалось изменить архив. Попробуйте ещё раз.');
+  } finally {
+    archiving.value = '';
+  }
+};
 
 const categoryLabels: Record<string, string> = {
   adult: 'Для взрослых',
@@ -472,24 +535,39 @@ const categoryLabels: Record<string, string> = {
 const categoryLabel = (c: string) => categoryLabels[c] || c;
 
 onMounted(async () => {
-  await coursesStore.fetchCourses();
+  await coursesStore.fetchCourses(true);
   fetchSubmissions();
 });
 
-const fetchSubmissions = async () => {
+const fetchSubmissions = async (more = false) => {
+  if (submissionsLoading.value) return;
+  if (!more) submissionCursor.value = null;
+  if (!more)
+    appliedSubmissionFilter = { q: submissionSearch.value.trim(), status: submissionStatus.value };
   submissionsLoading.value = true;
   submissionsError.value = '';
   try {
-    const response = await axios.get(`${API_URL}/admin/submissions`);
-    submissions.value = Array.isArray(response.data) ? response.data : [];
+    const response = await axios.get(`${API_URL}/admin/submissions`, {
+      params: { ...appliedSubmissionFilter, ...(more ? { cursor: submissionCursor.value } : {}) },
+    });
+    const rows: Submission[] = Array.isArray(response.data) ? response.data : [];
+    submissions.value = more
+      ? [
+          ...submissions.value,
+          ...rows.filter(
+            (row) =>
+              !submissions.value.some(
+                (old) => old.userId === row.userId && old.homeworkId === row.homeworkId,
+              ),
+          ),
+        ]
+      : rows;
+    submissionCursor.value = response.headers['x-next-cursor'] || null;
+    submissionTotal.value = Number(response.headers['x-total-count'] ?? rows.length);
+    pendingCount.value = Number(
+      response.headers['x-pending-count'] ?? rows.filter((row) => !row.grade).length,
+    );
   } catch {
-    console.error('Request failed');
-    /*
-     * Without this the list silently falls back to its empty state, so a failed
-     * request looked exactly like "nobody has submitted anything" — and an
-     * administrator would conclude there was nothing to grade.
-     */
-    submissions.value = [];
     submissionsError.value = 'Не удалось загрузить работы. Проверьте соединение.';
   } finally {
     submissionsLoading.value = false;
@@ -623,6 +701,11 @@ const submitGrade = async () => {
 </script>
 
 <style scoped>
+.list-filters {
+  max-width: 40rem;
+  margin-block: var(--space-5);
+}
+
 .content-builder {
   display: grid;
   gap: var(--space-3);
