@@ -111,6 +111,12 @@ for (const theme of ['light', 'dark']) {
         const onError = (error: Error) => errors.push(error.message);
         page.on('pageerror', onError);
         await page.goto(path);
+        // System fonts vary by OS; exercise the wider Linux fallback on narrow screens.
+        if (width === 320)
+          await page.addStyleTag({
+            content:
+              ":root { --font-sans: 'DejaVu Sans', sans-serif; --font-display: 'DejaVu Sans', sans-serif; }",
+          });
         await expect(page.locator('main')).toBeVisible();
         await page.waitForTimeout(450);
         // Contrast must be measured after finite entrance animations settle;
@@ -123,10 +129,22 @@ for (const theme of ['light', 'dark']) {
               .map((animation) => animation.finished.catch(() => {})),
           ),
         );
+        const layout = await page.evaluate(() => ({
+          viewport: innerWidth,
+          width: document.documentElement.scrollWidth,
+          overflow: [...document.querySelectorAll('body *')]
+            .filter((element) => element.getBoundingClientRect().right > innerWidth)
+            .slice(0, 8)
+            .map((element) => ({
+              tag: element.tagName,
+              className: element.getAttribute('class'),
+              right: element.getBoundingClientRect().right,
+            })),
+        }));
         expect(
-          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-          `${path}: horizontal overflow`,
-        ).toBe(true);
+          layout.width,
+          `${path}: horizontal overflow ${JSON.stringify(layout)}`,
+        ).toBeLessThanOrEqual(layout.viewport);
         expect(errors, `${path}: uncaught JavaScript errors`).toEqual([]);
         const audit = await new AxeBuilder({ page })
           .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
@@ -489,7 +507,12 @@ test('mobile dashboard statistics fit with large numbers and wider text', async 
   await page.locator('.stat-val').evaluateAll((nodes) => {
     for (const node of nodes) node.textContent = '2147483647';
   });
-  await page.addStyleTag({ content: '.stat-lbl { font-family: sans-serif; font-size: 18px; }' });
+  await page.addStyleTag({
+    content: `
+      :root { --font-sans: 'DejaVu Sans', sans-serif; --font-display: 'DejaVu Sans', sans-serif; }
+      .stat-lbl { font-size: 18px; }
+    `,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   for (const tile of await page.locator('.stat-tile').all()) {
     expect(await tile.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);

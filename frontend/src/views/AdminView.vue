@@ -673,6 +673,7 @@ const submitGrade = async () => {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-6);
   border-bottom: 1px solid var(--border-color);

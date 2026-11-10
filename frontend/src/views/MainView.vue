@@ -423,7 +423,7 @@ function formatDate(d: string) {
 
 .dash-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: var(--space-5);
   align-items: start;
 }
@@ -472,7 +472,7 @@ function formatDate(d: string) {
 
 .actions-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
 }
 .action-card {
@@ -572,7 +572,7 @@ function formatDate(d: string) {
 
 @media (max-width: 980px) {
   .dash-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -593,7 +593,16 @@ function formatDate(d: string) {
     flex-direction: column;
   }
   .actions-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .support-callout {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+  .support-callout > button {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 </style>
