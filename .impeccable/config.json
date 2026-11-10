@@ -1,0 +1,15 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": ["frontend/src/views/DiaryView.vue"],
+        "createdAt": "2026-11-10T21:19:00.577Z",
+        "reason": "Agent: the only side-tab finding is the semantic Markdown blockquote border at line 572, present since c10956b; it distinguishes quoted text, not a decorative card accent."
+      }
+    ]
+  }
+}
