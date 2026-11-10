@@ -1,4 +1,20 @@
 import pino, { type LoggerOptions } from 'pino';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+export const requestContext = new AsyncLocalStorage<{ requestId: string }>();
+
+// ORM/provider messages can embed entire private payloads; log only diagnostic metadata.
+const serializeError = (error: unknown) => {
+  const value = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  return {
+    type: error instanceof Error ? error.constructor.name : 'Error',
+    code:
+      typeof value.code === 'string' && /^(?:P\d{4}|E[A-Z_]{2,40})$/.test(value.code)
+        ? value.code
+        : undefined,
+    status: Number.isInteger(value.status) ? value.status : undefined,
+  };
+};
 
 /**
  * Logging is configured entirely through the environment, so the same image can
@@ -25,8 +41,10 @@ const format = (process.env.LOG_FORMAT ?? defaultFormat).toLowerCase();
 // not buried under application noise.
 const level = process.env.LOG_LEVEL ?? (isTest ? 'silent' : isProduction ? 'info' : 'debug');
 
-const options: LoggerOptions = {
+export const loggerOptions: LoggerOptions = {
   level,
+  mixin: () => ({ ...requestContext.getStore() }),
+  serializers: { err: serializeError, reason: serializeError },
   // Anything that could carry a credential or personal data is replaced before it
   // reaches a transport. Redaction lives here so a careless `logger.info({ req })`
   // elsewhere cannot leak a token.
@@ -39,10 +57,20 @@ const options: LoggerOptions = {
       'accessToken',
       'refreshToken',
       'authorization',
+      'apiKey',
+      'cookie',
+      'body',
+      'req.body',
+      'req.url',
+      'req.originalUrl',
+      'req.query',
+      'req.params',
       'req.headers.authorization',
       'req.headers.cookie',
       'headers.authorization',
       'headers.cookie',
+      'headers["set-cookie"]',
+      'res.headers["set-cookie"]',
       '*.password',
       '*.token',
       '*.apiKey',
@@ -61,13 +89,13 @@ const options: LoggerOptions = {
 export const logger = pino(
   format === 'pretty'
     ? {
-        ...options,
+        ...loggerOptions,
         transport: {
           target: 'pino-pretty',
           options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
         },
       }
-    : options,
+    : loggerOptions,
 );
 
 /** Child logger so each module can tag its output: `const log = createLogger('aiService')`. */

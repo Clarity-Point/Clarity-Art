@@ -38,8 +38,8 @@ export function useProfileHistory() {
       await axios.put(`${API_URL}/gallery/toggle-public`, { id, isPublic });
       const img = storeProfileRef.value?.imageAnalysisHistory?.find((i) => i.id === id);
       if (img) img.isPublic = isPublic;
-    } catch (e) {
-      console.error(e);
+    } catch {
+      console.error('Request failed');
     }
   };
 

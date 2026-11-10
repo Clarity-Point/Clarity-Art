@@ -8,6 +8,11 @@
       </p>
     </header>
 
+    <label class="row"
+      ><input v-model="showHidden" type="checkbox" @change="fetchGallery" /> Показать скрытые мной
+      работы</label
+    >
+    <p role="status">{{ moderationMessage }}</p>
     <div v-if="isLoading" class="grid grid-auto">
       <div v-for="n in 6" :key="n" class="gallery-card">
         <div class="skeleton gallery-cover-skeleton"></div>
@@ -64,6 +69,32 @@
               {{ item.likes || 0 }}
             </button>
           </div>
+          <div class="stack moderation-actions">
+            <button class="btn-ghost" :disabled="moderating" @click="hide(item.id)">
+              {{ showHidden ? 'Вернуть в галерею' : 'Скрыть для меня' }}
+            </button>
+            <details v-if="!showHidden">
+              <summary>Пожаловаться</summary>
+              <form class="stack" @submit.prevent="report(item.id)">
+                <label :for="`report-reason-${item.id}`">Причина</label>
+                <select :id="`report-reason-${item.id}`" v-model="reason[item.id]">
+                  <option value="privacy">Нарушение приватности</option>
+                  <option value="harassment">Оскорбление или травля</option>
+                  <option value="unsafe">Опасный контент</option>
+                  <option value="spam">Спам</option>
+                  <option value="other">Другая причина</option>
+                </select>
+                <label
+                  >Комментарий<textarea
+                    v-model="detail[item.id]"
+                    maxlength="1000"
+                    rows="3"
+                  ></textarea>
+                </label>
+                <button class="btn-outline" :disabled="moderating">Отправить жалобу</button>
+              </form>
+            </details>
+          </div>
         </div>
       </article>
     </div>
@@ -95,6 +126,11 @@ interface GalleryItem {
   imageUrl?: string;
 }
 
+const showHidden = ref(false),
+  moderating = ref(false),
+  moderationMessage = ref(''),
+  reason = ref<Record<string, string>>({}),
+  detail = ref<Record<string, string>>({});
 const galleryItems = ref<GalleryItem[]>([]);
 const isLoading = ref(true);
 const errorMessage = ref('');
@@ -105,10 +141,13 @@ const fetchGallery = async () => {
   try {
     isLoading.value = true;
     errorMessage.value = '';
-    const response = await axios.get(`${API_URL}/gallery`);
+    const response = await axios.get(`${API_URL}/gallery`, {
+      params: { hidden: showHidden.value },
+    });
     galleryItems.value = response.data;
-  } catch (error) {
-    console.error('Failed to fetch gallery:', error);
+    for (const item of galleryItems.value) reason.value[item.id] ||= 'privacy';
+  } catch {
+    console.error('Failed to fetch gallery:');
     errorMessage.value = 'Не удалось загрузить галерею. Проверьте соединение.';
   } finally {
     isLoading.value = false;
@@ -132,8 +171,8 @@ const like = async (id: string) => {
       item.likes = response.data.likes;
       item.liked = true;
     }
-  } catch (error) {
-    console.error('Failed to like post:', error);
+  } catch {
+    console.error('Failed to like post:');
     toastStore.error('Не удалось поставить отметку «нравится». Попробуйте ещё раз.');
   } finally {
     const next = new Set(pendingLikes.value);
@@ -142,6 +181,38 @@ const like = async (id: string) => {
   }
 };
 
+async function hide(id: string) {
+  if (moderating.value) return;
+  moderating.value = true;
+  try {
+    await axios.put(`${API_URL}/gallery/${id}/hidden`, { hidden: !showHidden.value });
+    galleryItems.value = galleryItems.value.filter((item) => item.id !== id);
+    moderationMessage.value = showHidden.value
+      ? 'Работа возвращена в галерею.'
+      : 'Работа скрыта для вас.';
+  } catch {
+    toastStore.error('Не удалось изменить видимость работы.');
+  } finally {
+    moderating.value = false;
+  }
+}
+async function report(id: string) {
+  if (moderating.value) return;
+  moderating.value = true;
+  try {
+    await axios.post(`${API_URL}/gallery/${id}/report`, {
+      reason: reason.value[id],
+      detail: detail.value[id] || '',
+    });
+    galleryItems.value = galleryItems.value.filter((item) => item.id !== id);
+    delete detail.value[id];
+    moderationMessage.value = 'Жалоба отправлена. Работа скрыта для вас.';
+  } catch {
+    toastStore.error('Не удалось отправить жалобу. Повторите позже.');
+  } finally {
+    moderating.value = false;
+  }
+}
 // View-only helpers (no business logic / no data changes)
 const initialsOf = (name: string) => {
   const trimmed = (name || '').trim();
@@ -167,6 +238,13 @@ const previewOf = (result: string) => {
 </script>
 
 <style scoped>
+.moderation-actions {
+  margin-top: var(--space-3);
+}
+.moderation-actions label {
+  display: grid;
+  gap: var(--space-2);
+}
 .page-head {
   margin-bottom: var(--space-5);
 }

@@ -5,6 +5,7 @@
       Место для ваших мыслей и чувств. Пишите свободно — здесь вас никто не торопит и не оценивает.
     </p>
 
+    <MoodCheckIn />
     <!-- New entry composer -->
     <section class="card composer-card">
       <div class="composer-head">
@@ -18,18 +19,26 @@
         id="new-entry"
         ref="composerTextarea"
         v-model="newEntryText"
+        maxlength="5000"
+        :disabled="!draftReady || isSavingEntry"
         placeholder="Опишите, что происходит внутри вас прямо сейчас..."
       ></textarea>
       <div class="composer-actions">
         <button
           class="btn-primary"
-          @click="submitNewEntry"
-          :disabled="!newEntryText.trim() || isSavingEntry"
+          @click="saveEntry"
+          :disabled="!draftReady || !newEntryText.trim() || isSavingEntry"
         >
           <Icon name="edit" :size="17" />
           {{ isSavingEntry ? 'Сохраняем…' : 'Добавить запись' }}
         </button>
       </div>
+      <DraftStatus
+        :state="draftState"
+        :error="draftError"
+        @retry="flushDraft"
+        @reload="reloadSaved"
+      />
       <p v-if="entryError" class="error-message" role="alert">{{ entryError }}</p>
     </section>
 
@@ -125,7 +134,8 @@
     <!-- Entries -->
     <section class="entries-section">
       <div class="section-head">
-        <h2 class="section-title">Все записи</h2>
+        <h2 class="section-title">Последние записи</h2>
+        <RouterLink to="/history?kind=diary">Полная история и поиск</RouterLink>
       </div>
 
       <div v-if="diaryEntries.length === 0" class="empty-state">
@@ -138,7 +148,12 @@
       </div>
 
       <div v-else class="stack">
-        <article v-for="entry in sortedDiaryEntries" :key="entry.id" class="card entry-card">
+        <article
+          v-for="entry in sortedDiaryEntries"
+          :key="entry.id"
+          :id="`entry-${entry.id}`"
+          class="card entry-card"
+        >
           <div v-if="editingEntryId === entry.id" class="entry-edit-mode">
             <textarea
               aria-label="Текст записи"
@@ -179,6 +194,14 @@
 </template>
 
 <script setup lang="ts">
+import { computed, nextTick, watch } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
+import axios from 'axios';
+import { useAuthStore } from '@/stores/authStore';
+import { useUserProfileStore } from '@/stores/userProfileStore';
+import { useServerDraft } from '@/composables/useServerDraft';
+import DraftStatus from '@/components/DraftStatus.vue';
+import MoodCheckIn from '@/components/MoodCheckIn.vue';
 import VueMarkdown from 'vue-markdown-render';
 import Icon from '@/components/Icon.vue';
 import { useDiaryEntries } from '@/composables/useDiaryEntries';
@@ -202,6 +225,57 @@ const {
   sortedDiaryEntries,
   formatEntryDate,
 } = useDiaryEntries();
+
+const { draftReady, draftState, draftError, flushDraft, reloadDraft } = useServerDraft(
+  newEntryText,
+  'diary',
+  computed(() => 'new'),
+);
+const reloadSaved = () => {
+  if (
+    !newEntryText.value ||
+    window.confirm(
+      'Заменить текст в форме сохранённым черновиком? Скопируйте несохранённые изменения перед продолжением.',
+    )
+  )
+    void reloadDraft();
+};
+const saveEntry = async () => {
+  if (isSavingEntry.value || !(await flushDraft())) return;
+  await submitNewEntry();
+  if (!newEntryText.value) await flushDraft();
+};
+const route = useRoute();
+const auth = useAuthStore();
+let entryRequest = 0;
+watch(
+  () => route.query.entry,
+  async (id) => {
+    const current = ++entryRequest;
+    const session = auth.sessionRevision;
+    if (typeof id !== 'string') return;
+    try {
+      const { data } = await axios.get(
+        `${import.meta.env.VITE_API_URL || '/api'}/diary/${encodeURIComponent(id)}`,
+      );
+      if (current !== entryRequest || session !== auth.sessionRevision) return;
+      const store = useUserProfileStore();
+      if (!store.profile.diaryEntries.some((entry) => entry.id === data.id))
+        store.profile.diaryEntries.unshift({
+          id: data.id,
+          text: data.content,
+          date: data.date,
+          analysis: { mood: data.riskLevel },
+        });
+      await nextTick();
+      document.getElementById(`entry-${data.id}`)?.scrollIntoView({ block: 'center' });
+    } catch {
+      if (current !== entryRequest || session !== auth.sessionRevision) return;
+      entryError.value = 'Не удалось открыть запись из истории.';
+    }
+  },
+  { immediate: true },
+);
 
 const {
   analysisPeriod,

@@ -180,7 +180,7 @@ the environment — the same image works in every mode without a rebuild.
   "path": "/api/courses",
   "status": 200,
   "durationMs": 12.4,
-  "msg": "GET /api/courses 200",
+  "msg": "HTTP request completed",
 }
 ```
 
@@ -224,7 +224,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Project documentation
 
 [Documentation index](docs/README.md) · [Project map](docs/architecture/project-map.md) ·
-[Operations](docs/operations/runbook.md) · [Audit](docs/audits/2026-10-16.md).
+[Operations](docs/operations/runbook.md) · [Audit](docs/audits/2026-11-10.md).
 
 Run `npm run check` for local verification and `npm run test:browser` for browser
 interface checks (install Chromium first with `npx playwright install chromium`).

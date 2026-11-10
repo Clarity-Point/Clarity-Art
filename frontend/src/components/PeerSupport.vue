@@ -61,8 +61,8 @@ const fetchMessages = async () => {
   try {
     const response = await axios.get(`${API_URL}/org/peer-support`);
     messages.value = response.data;
-  } catch (e) {
-    console.error(e);
+  } catch {
+    console.error('Request failed');
   }
 };
 

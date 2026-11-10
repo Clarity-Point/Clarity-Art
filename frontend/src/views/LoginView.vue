@@ -55,6 +55,7 @@
           <button type="submit" class="btn-primary btn-lg btn-block" :disabled="isLoading">
             {{ isLoading ? 'Входим…' : 'Войти' }}
           </button>
+          <RouterLink to="/forgot-password">Забыли пароль?</RouterLink>
         </form>
 
         <p class="auth-switch muted">

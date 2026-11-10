@@ -6,6 +6,30 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
   routes: [
     {
+      path: '/history',
+      name: 'history',
+      component: () => import('../views/HistoryView.vue'),
+      meta: { title: 'Вся история' },
+    },
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('../views/PasswordRecoveryView.vue'),
+      meta: { public: true, title: 'Восстановление доступа' },
+    },
+    {
+      path: '/reset-password',
+      name: 'reset-password',
+      component: () => import('../views/PasswordRecoveryView.vue'),
+      meta: { public: true, title: 'Новый пароль' },
+    },
+    {
+      path: '/admin/moderation',
+      name: 'moderation',
+      component: () => import('../views/ModerationView.vue'),
+      meta: { requiresAdmin: true, title: 'Модерация' },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
@@ -152,7 +176,8 @@ router.beforeEach(async (to) => {
     // boundary — this just keeps users out of pages that would only error for them.
     return { name: 'main' };
   }
-  if (to.meta.public && authStore.isAuthenticated) return { name: 'main' };
+  if (['login', 'register'].includes(String(to.name)) && authStore.isAuthenticated)
+    return { name: 'main' };
   return true;
 });
 

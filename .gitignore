@@ -47,6 +47,7 @@ Thumbs.db
 # Misc
 *.local
 .cache/
+.impeccable/hook.cache.json
 
 # Private local drawings
 backend/data/

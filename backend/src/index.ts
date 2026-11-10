@@ -33,6 +33,7 @@ import {
 } from './controllers/aiController';
 import {
   createDiaryEntry,
+  getDiaryEntry,
   getDiaryEntries,
   updateDiaryEntry,
   deleteDiaryEntry,
@@ -93,6 +94,24 @@ import { logger } from './config/logger';
 import prisma from './config/prisma';
 import { getHealth } from './controllers/healthController';
 
+import { getDraft, saveDraft } from './controllers/draftController';
+import { requestPasswordReset, resetPassword } from './controllers/passwordResetController';
+import { getHistory } from './controllers/historyController';
+import {
+  listMoodCheckIns,
+  saveMoodCheckIn,
+  deleteMoodCheckIn,
+} from './controllers/moodCheckInController';
+import {
+  reportImage,
+  setHiddenImage,
+  listReports,
+  resolveReport,
+  restoreImage,
+} from './controllers/moderationController';
+import { saveCoursePosition, getHomework } from './controllers/courseController';
+import { updateLesson } from './controllers/adminController';
+
 const app = express();
 const port = Number(process.env.PORT) || 3100;
 
@@ -128,6 +147,7 @@ const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['X-Request-Id', 'X-Next-Cursor'],
   credentials: true,
 };
 
@@ -210,6 +230,28 @@ if (process.env.NODE_ENV !== 'production') {
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 }
 
+const recoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Слишком много попыток. Повторите позже.' },
+});
+app.post('/api/auth/forgot-password', recoveryLimiter, requestPasswordReset);
+app.post('/api/auth/reset-password', recoveryLimiter, resetPassword);
+app.get('/api/drafts/:kind/:key', authenticateToken, getDraft);
+app.put('/api/drafts/:kind/:key', authenticateToken, saveDraft);
+app.get('/api/history', authenticateToken, getHistory);
+app.get('/api/mood-checkins', authenticateToken, listMoodCheckIns);
+app.put('/api/mood-checkins', authenticateToken, saveMoodCheckIn);
+app.delete('/api/mood-checkins/:id', authenticateToken, deleteMoodCheckIn);
+app.post('/api/gallery/:id/report', authenticateToken, reportImage);
+app.put('/api/gallery/:id/hidden', authenticateToken, setHiddenImage);
+app.get('/api/admin/reports', authenticateToken, isAdmin, listReports);
+app.post('/api/admin/reports/:id/resolve', authenticateToken, isAdmin, resolveReport);
+app.post('/api/admin/gallery/:id/restore', authenticateToken, isAdmin, restoreImage);
+app.put('/api/courses/:courseSlug/position', authenticateToken, saveCoursePosition);
+app.get('/api/homework/:id', authenticateToken, getHomework);
+app.put('/api/admin/lessons/:id', authenticateToken, isAdmin, updateLesson);
+
 // Auth
 app.post('/api/register', authLimiter, register);
 app.post('/api/login', authLimiter, login);
@@ -274,6 +316,7 @@ app.post(
 // Diary
 app.post('/api/diary', authenticateToken, updateStreak, createDiaryEntry);
 app.get('/api/diary', authenticateToken, getDiaryEntries);
+app.get('/api/diary/:id', authenticateToken, getDiaryEntry);
 app.put('/api/diary/:id', authenticateToken, updateStreak, updateDiaryEntry);
 app.delete('/api/diary/:id', authenticateToken, deleteDiaryEntry);
 

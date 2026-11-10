@@ -147,6 +147,7 @@ useFocusScope(
 
 const mainNav = [
   { to: '/', icon: 'home', name: 'Главная', desc: 'Обзор и быстрый старт', exact: true },
+  { to: '/history', icon: 'file-text', name: 'Вся история', desc: 'Поиск по вашим записям' },
   { to: '/diary', icon: 'edit', name: 'Дневник', desc: 'Записать мысли и чувства' },
   { to: '/chat', icon: 'message-circle', name: 'Чат-поддержка', desc: 'Поговорить с ассистентом' },
   { to: '/image-analysis', icon: 'image', name: 'Анализ рисунка', desc: 'Понять образ и эмоции' },
@@ -169,7 +170,13 @@ const communityNav = [
 const manageNav = computed(() => {
   const items: { to: string; icon: string; name: string; desc: string }[] = [];
   if (isAdmin.value)
-    items.push({ to: '/admin', icon: 'shield', name: 'Админ-панель', desc: 'Управление системой' });
+    items.push({
+      to: '/admin/moderation',
+      icon: 'shield',
+      name: 'Модерация',
+      desc: 'Жалобы сообщества',
+    });
+  items.push({ to: '/admin', icon: 'shield', name: 'Админ-панель', desc: 'Управление системой' });
   if (isTherapist.value)
     items.push({
       to: '/therapist',

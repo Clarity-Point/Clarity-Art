@@ -83,8 +83,8 @@ ${entriesText}
       } else {
         diaryAnalysisError.value = 'Не удалось получить анализ дневника.';
       }
-    } catch (apiError) {
-      console.error('Error during diary analysis:', apiError);
+    } catch {
+      console.error('Error during diary analysis:');
       diaryAnalysisError.value = 'Ошибка при анализе дневника.';
     } finally {
       isAnalyzingDiary.value = false;

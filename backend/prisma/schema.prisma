@@ -44,6 +44,12 @@ model User {
   patients        User[]            @relation("TherapistPatients")
   therapist       User?             @relation("TherapistPatients", fields: [therapistId], references: [id], onDelete: SetNull)
 
+  drafts         Draft[]
+  passwordResets PasswordReset[]
+  galleryReports GalleryReport[]
+  hiddenImages   HiddenImage[]
+  moodCheckIns   MoodCheckIn[]
+
   @@index([organizationId])
   @@index([therapistId])
 }
@@ -73,7 +79,7 @@ model Profile {
 }
 
 model ImageAnalysis {
-  id                   String      @id @default(uuid())
+  id                   String          @id @default(uuid())
   userId               String
   prompt               String
   result               String
@@ -83,16 +89,19 @@ model ImageAnalysis {
   originalImageName    String?
   extendedQuestions    Json?
   extendedAnalysisText String?
-  date                 DateTime    @default(now())
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-  isPublic             Boolean     @default(false)
-  likes                Int         @default(0)
-  tokensPrompt         Int         @default(0)
-  tokensCompletion     Int         @default(0)
-  cost                 Float       @default(0)
-  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                 DateTime        @default(now())
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  isPublic             Boolean         @default(false)
+  likes                Int             @default(0)
+  tokensPrompt         Int             @default(0)
+  tokensCompletion     Int             @default(0)
+  cost                 Float           @default(0)
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   likedBy              ImageLike[]
+  moderationStatus     String          @default("VISIBLE")
+  reports              GalleryReport[]
+  hiddenBy             HiddenImage[]
 
   @@index([userId, date])
   @@index([isPublic, date])
@@ -249,6 +258,7 @@ model CourseProgress {
   courseId         String
   progress         Int      @default(0)
   rewardedProgress Int      @default(0)
+  lastLessonId     String?
   completedLessons String[] @default([])
   lastAccessed     DateTime @default(now())
   createdAt        DateTime @default(now())
@@ -323,4 +333,68 @@ enum Role {
   MENTOR
   ORG_ADMIN
   THERAPIST
+}
+
+model Draft {
+  id        String   @id @default(uuid())
+  userId    String
+  kind      String
+  key       String
+  text      String   @default("")
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, key])
+}
+
+model PasswordReset {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  tokenHash      String   @unique
+  sessionVersion Int
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GalleryReport {
+  id         String        @id @default(uuid())
+  reporterId String
+  imageId    String
+  reason     String
+  detail     String        @default("")
+  status     String        @default("PENDING")
+  createdAt  DateTime      @default(now())
+  reviewedAt DateTime?
+  reviewedBy String?
+  reporter   User          @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  image      ImageAnalysis @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([reporterId, imageId])
+  @@index([status, createdAt])
+}
+
+model HiddenImage {
+  id      String        @id @default(uuid())
+  userId  String
+  imageId String
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  image   ImageAnalysis @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, imageId])
+  @@index([imageId])
+}
+
+model MoodCheckIn {
+  id        String   @id @default(uuid())
+  userId    String
+  day       DateTime @db.Date
+  score     Int
+  note      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
 }

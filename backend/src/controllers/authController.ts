@@ -217,6 +217,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
         courseName: cp.course.title,
         progress: cp.progress,
         completedLessons: cp.completedLessons,
+        lastLessonId: cp.lastLessonId,
         lastAccessed: cp.lastAccessed,
         completedDate: cp.progress === 100 ? cp.updatedAt : undefined,
       })),
@@ -375,7 +376,9 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   const validation = changePasswordSchema.safeParse(req.body);
   if (!validation.success) {
-    return res.status(400).json({ error: 'Новый пароль должен содержать не менее 8 символов' });
+    return res
+      .status(400)
+      .json({ error: 'Используйте пароль от 8 символов; слишком длинную фразу сократите.' });
   }
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
@@ -393,14 +396,22 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   if (await bcrypt.compare(validation.data.newPassword, user.password)) {
     return res.status(400).json({ error: 'Новый пароль должен отличаться от текущего' });
   }
-  const updatedUser = await prisma.user.update({
-    where: { id: req.user.id },
-    data: {
-      password: await bcrypt.hash(validation.data.newPassword, 12),
-      sessionVersion: { increment: 1 },
-    },
-    select: { id: true, email: true, role: true, sessionVersion: true },
-  });
+  const updatedUser = await prisma.user
+    .update({
+      where: { id: req.user.id, password: user.password },
+      data: {
+        password: await bcrypt.hash(validation.data.newPassword, 12),
+        sessionVersion: { increment: 1 },
+      },
+      select: { id: true, email: true, role: true, sessionVersion: true },
+    })
+    .catch((error: unknown) => {
+      if (typeof error === 'object' && error && 'code' in error && error.code === 'P2025')
+        return null;
+      throw error;
+    });
+  if (!updatedUser)
+    return res.status(409).json({ error: 'Пароль уже изменён другим запросом. Войдите заново.' });
   setSessionCookie(res, updatedUser);
   recordAudit({
     action: 'auth.password_changed',
@@ -479,6 +490,20 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
       chatSessions: { include: { messages: true } },
       challenges: { include: { challenge: true } },
       notifications: true,
+      drafts: true,
+      moodCheckIns: true,
+      galleryReports: {
+        select: {
+          imageId: true,
+          reason: true,
+          detail: true,
+          status: true,
+          createdAt: true,
+          reviewedAt: true,
+        },
+      },
+      hiddenImages: { select: { imageId: true } },
+      imageLikes: { select: { imageId: true, createdAt: true } },
       sentimentTrends: true,
     },
   });

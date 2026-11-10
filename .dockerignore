@@ -22,6 +22,7 @@ backend/src/generated
 .vscode
 .idea
 .omc
+.impeccable
 
 # Docs and tooling have no effect on the runtime image.
 *.md

@@ -51,6 +51,8 @@ services:
       # Use "local" only for an on-premise endpoint. External mode enables the
       # explicit, revocable consent gate in the user profile.
       AI_DATA_PROCESSING_MODE: ${AI_DATA_PROCESSING_MODE:-external}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       IMAGE_STORAGE_DIR: /app/data/images
     depends_on:
       db:

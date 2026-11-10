@@ -19,4 +19,9 @@ describe('HTTP request boundary', () => {
     const oversized = await request(app).get('/health').set('X-Request-Id', 'a'.repeat(200));
     expect(oversized.headers['x-request-id']).toMatch(/^[a-f0-9-]{36}$/);
   });
+  it('exposes pagination and correlation headers to the configured frontend', async () => {
+    const response = await request(app).get('/health').set('Origin', 'http://localhost:5173');
+    expect(response.headers['access-control-expose-headers']).toContain('X-Next-Cursor');
+    expect(response.headers['access-control-expose-headers']).toContain('X-Request-Id');
+  });
 });

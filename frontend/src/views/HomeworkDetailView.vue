@@ -14,7 +14,7 @@
           <Icon name="book-open" :size="15" />
           Относится к курсу
           <RouterLink :to="{ name: 'CourseDetail', params: { courseId: courseContextId } }">{{
-            getCourseTitle(courseContextId)
+            courseTitle
           }}</RouterLink>
         </p>
       </div>
@@ -32,13 +32,21 @@
         v-model="submissionContent"
         placeholder="Введите ваш ответ или ссылку на работу..."
         rows="6"
+        maxlength="20000"
+        :disabled="!draftReady || isSubmitting || !metadataReady"
       ></textarea>
+      <DraftStatus
+        :state="draftState"
+        :error="draftError"
+        @retry="flushDraft"
+        @reload="reloadSaved"
+      />
       <div class="submission-actions">
         <button
           type="button"
           class="btn-primary"
           @click="submitHomework"
-          :disabled="!submissionContent.trim() || isSubmitting"
+          :disabled="!submissionContent.trim() || isSubmitting || !draftReady || !metadataReady"
         >
           <Icon name="send" :size="16" /> {{ isSubmitting ? 'Отправляем…' : 'Сдать' }}
         </button>
@@ -91,165 +99,107 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { useUserProfileStore } from '@/stores/userProfileStore';
-import { useCoursesStore } from '@/stores/coursesStore';
-import { storeToRefs } from 'pinia';
+import axios from 'axios';
+import { useUserProfileStore, type HomeworkEntry } from '@/stores/userProfileStore';
+import { useServerDraft } from '@/composables/useServerDraft';
+import DraftStatus from '@/components/DraftStatus.vue';
 import Icon from '@/components/Icon.vue';
-
-const route = useRoute();
-const router = useRouter();
-const userProfileStore = useUserProfileStore();
-const coursesStore = useCoursesStore();
-const { profile } = storeToRefs(userProfileStore);
-
-const homeworkId = ref<string | null>(null);
-const homeworkTitle = ref<string>('Детали Задания');
-const homeworkDescription = ref<string>('');
-const courseContextId = ref<string | null>(null);
-
-const submissionContent = ref('');
-const submissionMessage = ref('');
-const isSubmitting = ref(false);
-
-const getCourseTitle = (id: string) =>
-  coursesStore.currentCourse?.id === id ? coursesStore.currentCourse.title : 'Неизвестный курс';
-
-const loadHomework = async () => {
-  const idFromRoute = route.params.homeworkId as string;
-  if (!idFromRoute) return;
-  homeworkId.value = idFromRoute;
-
-  // Reset everything the previous task left behind, otherwise moving from one
-  // assignment to another shows the old title, description and submitted text
-  // until the new fetch happens to resolve.
-  homeworkTitle.value = 'Детали Задания';
-  homeworkDescription.value = '';
-  submissionContent.value = '';
-  submissionMessage.value = '';
-  courseContextId.value = null;
-
-  // Homework metadata is served as part of its parent course (relatedHomework);
-  // there is no standalone homework API. CourseDetailView links here with the
-  // course id in ?courseContext, so we fetch that course and look the task up.
-  let resolved = false;
-  const courseContext = route.query.courseContext as string | undefined;
-  if (courseContext) {
-    courseContextId.value = courseContext;
-    const course = await coursesStore.fetchCourseById(courseContext);
-    const hw = course?.relatedHomework?.find((h) => h.id === idFromRoute);
-    if (hw) {
-      homeworkTitle.value = hw.title;
-      homeworkDescription.value = hw.description;
-      resolved = true;
-    }
-  }
-
-  const existingSubmission = profile.value.homeworkHistory.find(
-    (sub) => sub.homeworkId === homeworkId.value,
-  );
-  if (existingSubmission) {
-    submissionContent.value = existingSubmission.submittedContent;
-    submissionMessage.value = 'Вы уже сдавали это задание.';
-    if (!resolved) {
-      // Recover a readable title from the stored submission when course metadata is missing.
-      homeworkTitle.value = existingSubmission.homeworkTitle;
-      resolved = true;
-    }
-  }
-
-  if (!resolved) {
-    homeworkTitle.value = 'Задание не найдено';
-    homeworkDescription.value = 'Информация о домашнем задании не найдена.';
-  }
-};
-
-onMounted(loadHomework);
-
-/*
- * The router reuses this instance across param changes, so going straight from
- * one assignment to another without leaving the view kept the old content.
- */
-watch(
-  () => [route.params.homeworkId, route.query.courseContext],
-  () => {
-    void loadHomework();
-  },
+const route = useRoute(),
+  router = useRouter(),
+  userProfileStore = useUserProfileStore();
+const homeworkId = computed(() => String(route.params.homeworkId || ''));
+const homeworkTitle = ref('Детали задания'),
+  homeworkDescription = ref(''),
+  courseContextId = ref(''),
+  courseTitle = ref(''),
+  metadataReady = ref(false);
+const submissionContent = ref(''),
+  submissionMessage = ref(''),
+  isSubmitting = ref(false),
+  loadedSubmission = ref<HomeworkEntry | null>(null);
+const { draftReady, draftState, draftError, flushDraft, reloadDraft } = useServerDraft(
+  submissionContent,
+  'homework',
+  homeworkId,
 );
-
-const currentSubmission = computed(() => {
-  if (!homeworkId.value) return null;
-  return profile.value.homeworkHistory.find((sub) => sub.homeworkId === homeworkId.value);
-});
-
-const formattedSubmissionDate = computed(() => {
-  if (!currentSubmission.value) return '';
-  return new Date(currentSubmission.value.submissionDate).toLocaleDateString('ru-RU', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-});
-
-const submitHomework = async () => {
-  if (!homeworkId.value || !submissionContent.value.trim()) {
-    submissionMessage.value = 'Не удалось определить задание или содержимое пустое.';
+async function reloadSaved() {
+  if (
+    submissionContent.value &&
+    !window.confirm('Загрузить сохранённый черновик? Текущий текст будет заменён.')
+  )
     return;
-  }
-
-  isSubmitting.value = true;
-  const saved = await userProfileStore.addHomeworkSubmission({
-    homeworkId: homeworkId.value,
-    homeworkTitle: homeworkTitle.value,
-    submittedContent: submissionContent.value,
-  });
-  isSubmitting.value = false;
-  if (!saved) {
-    submissionMessage.value = 'Не удалось сдать задание. Ваш текст сохранён в форме.';
-    return;
-  }
-  submissionMessage.value = 'Задание успешно сдано!';
-
-  if (courseContextId.value) {
-    const course =
-      coursesStore.currentCourse?.id === courseContextId.value ? coursesStore.currentCourse : null;
-    const courseProgress = profile.value.courseProgress.find(
-      (cp) => cp.courseId === courseContextId.value,
-    );
-    const totalLessons =
-      (course?.modules ?? []).reduce((acc, mod) => acc + (mod.lessons?.length ?? 0), 0) || 0;
-    const homeworksForCourse = course?.relatedHomework || [];
-    const submittedHomeworks = profile.value.homeworkHistory.filter((sub) =>
-      homeworksForCourse.some((hw) => hw.id === sub.homeworkId),
-    );
-
-    const completedLessons = courseProgress?.completedLessons || [];
-    const totalItems = totalLessons + homeworksForCourse.length;
-    const completedItems = completedLessons.length + submittedHomeworks.length;
-    const newProgress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-
-    userProfileStore.updateCourseProgress({
-      courseId: courseContextId.value,
-      courseName: getCourseTitle(courseContextId.value),
-      progress: newProgress,
-      completedLessons,
-      lastAccessed: new Date().toISOString(),
-      completedDate: newProgress === 100 ? new Date().toISOString() : undefined,
-    });
-  }
-
-  setTimeout(() => {
+  await reloadDraft();
+}
+let request = 0;
+watch(
+  homeworkId,
+  async (id) => {
+    const current = ++request;
+    metadataReady.value = false;
+    loadedSubmission.value = null;
     submissionMessage.value = '';
-  }, 3000);
-};
-
-const goBack = () => {
-  if (window.history.length > 1) {
-    router.go(-1);
-  } else {
-    router.push('/courses');
+    homeworkTitle.value = 'Загрузка задания…';
+    try {
+      const { data } = await axios.get(`${import.meta.env.VITE_API_URL || '/api'}/homework/${id}`);
+      if (current !== request) return;
+      homeworkTitle.value = data.title;
+      homeworkDescription.value = data.description;
+      courseContextId.value = data.courseSlug;
+      courseTitle.value = data.courseTitle;
+      loadedSubmission.value = data.submission
+        ? { ...data.submission, homeworkId: id, homeworkTitle: data.title }
+        : null;
+      metadataReady.value = true;
+    } catch {
+      if (current === request) {
+        homeworkTitle.value = 'Не удалось загрузить задание';
+        homeworkDescription.value = 'Обновите страницу и повторите попытку.';
+      }
+    }
+  },
+  { immediate: true },
+);
+const currentSubmission = computed(
+  () =>
+    loadedSubmission.value ||
+    userProfileStore.profile.homeworkHistory.find((item) => item.homeworkId === homeworkId.value),
+);
+const formattedSubmissionDate = computed(() =>
+  currentSubmission.value
+    ? new Date(currentSubmission.value.submissionDate).toLocaleDateString('ru-RU')
+    : '',
+);
+async function submitHomework() {
+  if (isSubmitting.value || !metadataReady.value || !submissionContent.value.trim()) return;
+  isSubmitting.value = true;
+  submissionMessage.value = '';
+  try {
+    if (!(await flushDraft())) return;
+    const saved = await userProfileStore.addHomeworkSubmission({
+      homeworkId: homeworkId.value,
+      homeworkTitle: homeworkTitle.value,
+      submittedContent: submissionContent.value,
+    });
+    if (!saved) {
+      submissionMessage.value = 'Не удалось сдать задание. Ваш текст сохранён в черновике.';
+      return;
+    }
+    submissionMessage.value = 'Задание успешно сдано!';
+    loadedSubmission.value =
+      userProfileStore.profile.homeworkHistory.find(
+        (item) => item.homeworkId === homeworkId.value,
+      ) || null;
+    submissionContent.value = '';
+    await flushDraft();
+  } finally {
+    isSubmitting.value = false;
   }
+}
+const goBack = () => {
+  if (window.history.length > 1) router.go(-1);
+  else void router.push('/courses');
 };
 </script>
 

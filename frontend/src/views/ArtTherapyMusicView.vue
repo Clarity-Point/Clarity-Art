@@ -114,9 +114,9 @@ const playTrack = async (track: Track) => {
   await nextTick(); // Wait for the DOM to update so the audio element has the new src.
   if (audioPlayerRef.value) {
     audioPlayerRef.value.load();
-    audioPlayerRef.value.play().catch((error) => {
+    audioPlayerRef.value.play().catch(() => {
       // Autoplay may be blocked by the browser until the user interacts.
-      console.error('Ошибка воспроизведения:', error);
+      console.error('Ошибка воспроизведения:');
     });
   }
 };

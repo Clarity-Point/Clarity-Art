@@ -220,8 +220,8 @@ const fetchPatients = async () => {
   try {
     const response = await axios.get(`${API_URL}/therapist/patients`);
     patients.value = Array.isArray(response.data) ? response.data : [];
-  } catch (e) {
-    console.error('Error fetching patients', e);
+  } catch {
+    console.error('Error fetching patients');
     /*
      * Silently keeping the empty list made a network failure indistinguishable
      * from "you have no patients" — the single most misleading outcome on this

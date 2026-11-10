@@ -22,6 +22,15 @@ describe('authentication request ordering', () => {
     localStorage.clear();
     setActivePinia(createPinia());
   });
+  it('never prints the failed login request containing credentials', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(axios, 'post').mockRejectedValue({
+      config: { data: { password: 'private-password' } },
+    });
+    expect(await useAuthStore().login('private@example.test', 'private-password')).toBe(false);
+    expect(error).toHaveBeenCalledWith('Login failed:');
+    expect(JSON.stringify(error.mock.calls)).not.toContain('private');
+  });
 
   it('deduplicates concurrent profile restoration', async () => {
     const pending = deferred<ReturnType<typeof response>>();

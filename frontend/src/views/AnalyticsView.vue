@@ -5,6 +5,7 @@
       Карта настроения по вашим сессиям и наблюдения ИИ о том, что на неё влияет.
     </p>
 
+    <MoodCheckIn />
     <!-- Stats -->
     <section class="stats-row" aria-label="Сводка">
       <template v-if="loading">
@@ -126,6 +127,7 @@
 </template>
 
 <script setup lang="ts">
+import MoodCheckIn from '@/components/MoodCheckIn.vue';
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import Icon from '@/components/Icon.vue';
@@ -177,8 +179,8 @@ onMounted(async () => {
     }));
 
     correlations.value = corrRes.data;
-  } catch (error) {
-    console.error('Failed to fetch analytics:', error);
+  } catch {
+    console.error('Failed to fetch analytics:');
   } finally {
     loading.value = false;
   }

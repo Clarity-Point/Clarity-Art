@@ -5,9 +5,20 @@ import {
   gradeSubmissionSchema,
   profileUpdateSchema,
   progressSchema,
+  newPasswordSchema,
+  registerSchema,
 } from '../schemas';
 
 describe('persisted user-flow schemas', () => {
+  it('rejects passwords that bcrypt would silently truncate, including Cyrillic', () => {
+    expect(newPasswordSchema.safeParse('a'.repeat(72)).success).toBe(true);
+    expect(newPasswordSchema.safeParse('a'.repeat(73)).success).toBe(false);
+    expect(newPasswordSchema.safeParse('я'.repeat(36)).success).toBe(true);
+    expect(newPasswordSchema.safeParse('я'.repeat(37)).success).toBe(false);
+    expect(
+      registerSchema.safeParse({ email: ' user@example.com ', password: 'valid-password' }).success,
+    ).toBe(true);
+  });
   it('accepts fractional sleep hours from the profile UI', () => {
     const result = profileUpdateSchema.safeParse({ sleepHours: 7.5 });
     expect(result.success).toBe(true);
@@ -42,6 +53,7 @@ describe('persisted user-flow schemas', () => {
         userId: '28bf2c7d-c1d3-4325-bad5-3943ddfead27',
         homeworkId: '72225da8-3fa7-40ac-90ab-cd87ed7ea103',
         grade: '5/5',
+        submissionDate: '2026-11-10T10:00:00.000Z',
       }).success,
     ).toBe(true);
     expect(gradeSubmissionSchema.safeParse({ userId: 'bad', grade: '' }).success).toBe(false);

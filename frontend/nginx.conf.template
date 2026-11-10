@@ -2,10 +2,14 @@
 # over /etc/nginx/templates/*.template. Only real environment variables are
 # substituted, so nginx's own $uri / $host runtime variables pass through intact.
 
+log_format clarity escape=json '{"time":"$time_iso8601","requestId":"$upstream_http_x_request_id","method":"$request_method","status":$status,"durationSeconds":$request_time}';
+
 server {
     listen 80;
     server_name localhost;
     server_tokens off;
+    # Default combined logs contain the full query and Referer, including private searches.
+    access_log /dev/stdout clarity;
 
     include /etc/nginx/security-headers.conf;
 

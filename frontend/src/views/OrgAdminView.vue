@@ -292,8 +292,8 @@ const fetchStats = async () => {
       heatmapData: response.data.heatmapData || {},
       trends: response.data.trends || [],
     };
-  } catch (error) {
-    console.error('Failed to fetch org stats:', error);
+  } catch {
+    console.error('Failed to fetch org stats:');
     loadError.value = 'Не удалось загрузить статистику организации.';
   } finally {
     loading.value = false;

@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { createLogger } from '../config/logger';
 import { gradeSubmissionSchema } from '../schemas';
+import { recordAudit } from '../services/auditService';
 
 const log = createLogger('adminController');
 
@@ -247,20 +248,43 @@ export const getSubmissions = async (req: AuthRequest, res: Response) => {
 export const gradeSubmission = async (req: AuthRequest, res: Response) => {
   const validation = gradeSubmissionSchema.safeParse(req.body);
   if (!validation.success) return res.status(400).json({ error: 'Invalid grade submission' });
-  const { userId, homeworkId, grade, analysisText } = validation.data;
+  const { userId, homeworkId, grade, analysisText, submissionDate } = validation.data;
   try {
-    const submission = await prisma.submission.update({
-      where: {
-        userId_homeworkId: { userId, homeworkId },
-      },
+    const submission = await prisma.submission.updateMany({
+      where: { userId, homeworkId, submissionDate: new Date(submissionDate) },
       data: {
         grade,
         analysisText,
       },
     });
-    res.json(submission);
+    if (!submission.count)
+      return res.status(409).json({
+        error: 'Работа изменена или удалена. Обновите список перед проверкой.',
+      });
+    recordAudit({
+      action: 'admin.submission_graded',
+      actorId: req.user?.id,
+      subjectId: userId,
+      outcome: 'success',
+      meta: { homeworkId },
+    });
+    res.status(204).end();
   } catch (error) {
     log.error({ err: error }, 'gradeSubmission error');
     res.status(500).json({ error: 'Error grading submission' });
   }
+};
+
+export const updateLesson = async (req: AuthRequest, res: Response) => {
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+  if (!title || title.length > 200 || content.length > 20_000)
+    return res
+      .status(400)
+      .json({ error: 'Укажите название (до 200 символов) и материал (до 20000 символов)' });
+  const changed = await prisma.lesson.updateMany({
+    where: { id: req.params.id as string },
+    data: { title, content },
+  });
+  res.status(changed.count ? 204 : 404).end();
 };

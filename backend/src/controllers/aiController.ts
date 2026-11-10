@@ -98,14 +98,11 @@ export const chat = async (req: AuthRequest, res: Response) => {
     });
 
     // Award 5 points for each chat message
-    await rewardPoints(req.user.id, 5, 'Chat engagement');
+    await rewardPoints(req.user.id, 5);
 
     res.json({ reply, riskLevel, sessionId: session.id });
   } catch (error: unknown) {
-    log.error(
-      { err: error instanceof Error ? error.message : String(error) },
-      'Chat controller error',
-    );
+    log.error({ err: error }, 'Chat controller error');
     res.status(500).json({ error: 'Error processing your request' });
   }
 };
@@ -121,6 +118,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
   // Declared before the first provider call so an early disconnect is still
   // observed, and so the abort handler below can be attached exactly once.
   const abort = new AbortController();
+  res.once('close', () => abort.abort());
 
   try {
     const allowProvider = await canUseConfiguredAI(req.user.id);
@@ -176,11 +174,16 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     });
 
     const stream = await AIService.generateTextStream(messages, req.user.id, abort.signal);
+    if (abort.signal.aborted) {
+      await stream.cancel().catch(() => undefined);
+      return res.end();
+    }
 
     // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Connection', 'keep-alive');
+    res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
 
     let fullReply = '';
     const reader = stream.getReader();
@@ -197,10 +200,8 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     const releaseUpstream = () => {
       void reader.cancel().catch(() => undefined);
     };
-    res.on('close', () => {
-      abort.abort();
-      releaseUpstream();
-    });
+    abort.signal.addEventListener('abort', releaseUpstream, { once: true });
+    if (abort.signal.aborted) releaseUpstream();
 
     const forwardEvent = (event: string) => {
       for (const line of event.split('\n')) {
@@ -245,13 +246,13 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       await prisma.chatMessage.create({
         data: { sessionId: activeSessionId, role: 'assistant', content: fullReply },
       });
-      await rewardPoints(req.user.id, 5, 'Chat engagement');
+      await rewardPoints(req.user.id, 5);
     }
 
     res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
     res.end();
   } catch (error: unknown) {
-    log.error({ err: error instanceof Error ? error.message : String(error) }, 'Chat stream error');
+    log.error({ err: error }, 'Chat stream error');
     if (abort.signal.aborted) return res.end();
     if (!res.headersSent) {
       return res.status(502).json({ error: 'Не удалось получить ответ ассистента' });
@@ -385,14 +386,11 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
     }
 
     // Award 15 points for image analysis
-    if (!analysisId) await rewardPoints(req.user.id, 15, 'Image analysis');
+    if (!analysisId) await rewardPoints(req.user.id, 15);
 
     res.json({ reply, analysisId: analysis.id, timestamp: analysis.date });
   } catch (error: unknown) {
-    log.error(
-      { err: error instanceof Error ? error.message : String(error) },
-      'Image analysis controller error',
-    );
+    log.error({ err: error }, 'Image analysis controller error');
     res.status(500).json({ error: 'Error processing your image analysis request' });
   }
 };
@@ -402,7 +400,14 @@ export const getStoredImage = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
   try {
     const image = await prisma.imageAnalysis.findFirst({
-      where: { id, OR: [{ userId: req.user.id }, { isPublic: true }] },
+      where: {
+        id,
+        OR: [
+          { userId: req.user.id },
+          { isPublic: true, moderationStatus: 'VISIBLE' },
+          ...(req.user.role === 'ADMIN' ? [{ reports: { some: {} } }] : []),
+        ],
+      },
       select: { imageStorageKey: true, imageMimeType: true, imageUrl: true },
     });
     if (!image) return res.status(404).json({ error: 'Image not found' });

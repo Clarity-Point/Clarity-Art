@@ -71,7 +71,7 @@ export function useDiaryEntries() {
   // --- End Editing State & Logic ---
 
   const submitNewEntry = async () => {
-    if (newEntryText.value.trim() === '') return;
+    if (isSavingEntry.value || newEntryText.value.trim() === '') return;
     isSavingEntry.value = true;
     entryError.value = '';
     const saved = await userProfileStore.addDiaryEntry(newEntryText.value.trim());

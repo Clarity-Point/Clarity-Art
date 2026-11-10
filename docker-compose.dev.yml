@@ -53,6 +53,8 @@ services:
       AI_VISION_MODEL: ${AI_VISION_MODEL:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_DATA_PROCESSING_MODE: ${AI_DATA_PROCESSING_MODE:-local}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       IMAGE_STORAGE_DIR: /app/data/images
     ports:
       - '${BACKEND_PORT:-3100}:3100'

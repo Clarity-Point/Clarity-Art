@@ -7,6 +7,10 @@ import { AIService } from '../services/aiService';
 import { AnalyticsService } from '../services/analyticsService';
 import { validateTextInput } from '../security/inputValidation';
 import { canUseConfiguredAI } from '../services/aiConsentService';
+import { createLogger } from '../config/logger';
+import { recordAudit } from '../services/auditService';
+
+const log = createLogger('diaryController');
 
 export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -59,7 +63,8 @@ export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
     ]);
 
     res.status(201).json(entry);
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Diary creation failed');
     res.status(500).json({ error: 'Error creating diary entry' });
   }
 };
@@ -81,7 +86,8 @@ export const getDiaryEntries = async (req: AuthRequest, res: Response) => {
     });
     if (entries.length > limit) res.setHeader('X-Next-Cursor', entries[limit - 1].id);
     res.json(entries.slice(0, limit));
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Diary listing failed');
     res.status(500).json({ error: 'Error fetching diary entries' });
   }
 };
@@ -125,7 +131,8 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
     await Promise.allSettled([AnalyticsService.updateAttentionScore(req.user.id)]);
 
     res.json(updated);
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Diary update failed');
     res.status(500).json({ error: 'Error updating diary entry' });
   }
 };
@@ -142,10 +149,26 @@ export const deleteDiaryEntry = async (req: AuthRequest, res: Response) => {
     }
 
     await prisma.diaryEntry.delete({ where: { id } });
+    recordAudit({
+      action: 'content.diary_deleted',
+      actorId: req.user.id,
+      outcome: 'success',
+      meta: { entryId: id },
+    });
     // The linked SentimentTrend is removed by the database cascade.
     await Promise.allSettled([AnalyticsService.updateAttentionScore(req.user.id)]);
     res.json({ message: 'Entry deleted' });
-  } catch {
+  } catch (err) {
+    log.error({ err }, 'Diary deletion failed');
     res.status(500).json({ error: 'Error deleting diary entry' });
   }
+};
+
+export const getDiaryEntry = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.sendStatus(401);
+  const entry = await prisma.diaryEntry.findFirst({
+    where: { id: req.params.id as string, userId: req.user.id },
+  });
+  if (!entry) return res.status(404).json({ error: 'Запись не найдена' });
+  res.json(entry);
 };

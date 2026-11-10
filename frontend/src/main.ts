@@ -19,8 +19,8 @@ const pinia = createPinia();
 app.use(pinia);
 app.use(router);
 
-app.config.errorHandler = (error, _instance, info) => {
-  console.error('Unexpected UI error:', info, error);
+app.config.errorHandler = (_error, _instance, info) => {
+  console.error('Unexpected UI error:', info);
   useToastStore(pinia).error(
     'Экран столкнулся с ошибкой. Обновите страницу или повторите действие.',
   );

@@ -52,8 +52,8 @@ export const useAuthStore = defineStore('auth', () => {
       // GET /profile is the canonical, complete shape. Hydrating from the small
       // login response left history, points and progress empty until a reload.
       return await restoreSession();
-    } catch (error) {
-      console.error('Login failed:', error);
+    } catch {
+      console.error('Login failed:');
       return false;
     }
   }
@@ -64,8 +64,8 @@ export const useAuthStore = defineStore('auth', () => {
       await axios.post(`${API_URL}/register`, { email, password, name });
       if (revision !== sessionRevision.value) return false;
       return await login(email, password);
-    } catch (error) {
-      console.error('Registration failed:', error);
+    } catch {
+      console.error('Registration failed:');
       return false;
     }
   }

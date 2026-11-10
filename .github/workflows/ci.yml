@@ -87,6 +87,8 @@ jobs:
         run: node --test scripts/audit.test.mjs
 
       - name: Backend tests
+        env:
+          RUN_DATABASE_TESTS: 'true'
         run: npm test
         working-directory: ./backend
 

@@ -3,7 +3,6 @@ import prisma from '../config/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { progressSchema, homeworkSubmissionSchema } from '../schemas';
 import { checkAchievements } from '../middleware/gamification';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { calculateCourseProgress } from '../services/courseProgressService';
 
 /**
@@ -16,10 +15,13 @@ import { calculateCourseProgress } from '../services/courseProgressService';
  *       200:
  *         description: A list of courses.
  */
-export const getAllCourses = asyncHandler(async (req: AuthRequest, res: Response) => {
+export const getAllCourses = async (req: AuthRequest, res: Response) => {
   const courses = await prisma.course.findMany({
     include: {
-      modules: { include: { lessons: true }, orderBy: { order: 'asc' } },
+      modules: {
+        include: { lessons: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
+        orderBy: { order: 'asc' },
+      },
       homework: true,
     },
   });
@@ -34,7 +36,7 @@ export const getAllCourses = asyncHandler(async (req: AuthRequest, res: Response
   }));
 
   res.json(formatted);
-});
+};
 
 /**
  * @openapi
@@ -54,12 +56,15 @@ export const getAllCourses = asyncHandler(async (req: AuthRequest, res: Response
  *       404:
  *         description: Course not found.
  */
-export const getCourseBySlug = asyncHandler(async (req: AuthRequest, res: Response) => {
+export const getCourseBySlug = async (req: AuthRequest, res: Response) => {
   const slug = req.params.slug as string;
   const course = await prisma.course.findUnique({
     where: { slug },
     include: {
-      modules: { include: { lessons: true }, orderBy: { order: 'asc' } },
+      modules: {
+        include: { lessons: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
+        orderBy: { order: 'asc' },
+      },
       homework: true,
     },
   });
@@ -71,7 +76,7 @@ export const getCourseBySlug = asyncHandler(async (req: AuthRequest, res: Respon
     id: course.slug,
     relatedHomework: course.homework,
   });
-});
+};
 
 /**
  * @openapi
@@ -103,7 +108,7 @@ export const getCourseBySlug = asyncHandler(async (req: AuthRequest, res: Respon
  *       200:
  *         description: Progress updated.
  */
-export const updateProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+export const updateProgress = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
   const courseSlug = req.params.courseSlug as string;
@@ -182,7 +187,7 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
     progress: canonical.progress,
     completedLessons: canonical.completedLessons,
   });
-});
+};
 
 /**
  * @openapi
@@ -207,7 +212,7 @@ export const updateProgress = asyncHandler(async (req: AuthRequest, res: Respons
  *       200:
  *         description: Homework submitted.
  */
-export const submitHomework = asyncHandler(async (req: AuthRequest, res: Response) => {
+export const submitHomework = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
   const validation = homeworkSubmissionSchema.safeParse(req.body);
@@ -247,7 +252,7 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
       });
       const submission = await tx.submission.update({
         where: { userId_homeworkId: { userId: req.user!.id, homeworkId } },
-        data: { submittedContent, submissionDate: new Date() },
+        data: { submittedContent, submissionDate: new Date(), grade: null, analysisText: null },
       });
       const currentProgress = await tx.courseProgress.findUnique({
         where: {
@@ -300,6 +305,7 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
           courseName: homework.course.title,
           progress: courseProgress.progress,
           completedLessons: courseProgress.completedLessons,
+          lastLessonId: courseProgress.lastLessonId,
           lastAccessed: courseProgress.lastAccessed,
         },
       };
@@ -311,4 +317,43 @@ export const submitHomework = asyncHandler(async (req: AuthRequest, res: Respons
     await Promise.allSettled([checkAchievements(req.user.id)]);
   }
   res.json({ message: 'Homework submitted', ...result });
-});
+};
+
+export const saveCoursePosition = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.sendStatus(401);
+  const lessonId = typeof req.body?.lessonId === 'string' ? req.body.lessonId : '';
+  const lesson = await prisma.lesson.findFirst({
+    where: { id: lessonId, module: { course: { slug: req.params.courseSlug as string } } },
+    select: { id: true, module: { select: { courseId: true } } },
+  });
+  if (!lesson) return res.status(404).json({ error: 'Урок не найден в этом курсе' });
+  await prisma.courseProgress.upsert({
+    where: { userId_courseId: { userId: req.user.id, courseId: lesson.module.courseId } },
+    create: { userId: req.user.id, courseId: lesson.module.courseId, lastLessonId: lesson.id },
+    update: { lastLessonId: lesson.id, lastAccessed: new Date() },
+  });
+  res.status(204).end();
+};
+
+export const getHomework = async (req: AuthRequest, res: Response) => {
+  if (!req.user) return res.sendStatus(401);
+  const homework = await prisma.homework.findUnique({
+    where: { id: req.params.id as string },
+    include: {
+      course: { select: { slug: true, title: true } },
+      submissions: {
+        where: { userId: req.user.id },
+        select: { submittedContent: true, submissionDate: true, grade: true, analysisText: true },
+      },
+    },
+  });
+  if (!homework) return res.status(404).json({ error: 'Задание не найдено' });
+  res.json({
+    id: homework.id,
+    title: homework.title,
+    description: homework.description,
+    courseSlug: homework.course.slug,
+    courseTitle: homework.course.title,
+    submission: homework.submissions[0] || null,
+  });
+};

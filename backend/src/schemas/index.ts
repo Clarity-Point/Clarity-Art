@@ -1,19 +1,28 @@
 import { z } from 'zod';
 
+export const newPasswordSchema = z
+  .string()
+  .min(8)
+  .max(128)
+  .refine(
+    (password) => Buffer.byteLength(password, 'utf8') <= 72,
+    'Пароль слишком длинный. Используйте более короткую фразу.',
+  );
+
 export const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(128),
+  email: z.string().trim().email().max(254),
+  password: newPasswordSchema,
   name: z.string().trim().max(120).optional(),
 });
 
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().max(254),
   password: z.string(),
 });
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(128),
+  newPassword: newPasswordSchema,
 });
 
 export const deleteAccountSchema = z.object({ password: z.string().min(1).max(128) });
@@ -43,12 +52,13 @@ export const progressSchema = z.object({
 
 export const homeworkSubmissionSchema = z.object({
   homeworkId: z.string().uuid(),
-  submittedContent: z.string().min(1),
+  submittedContent: z.string().trim().min(1).max(20_000),
 });
 
 export const gradeSubmissionSchema = z.object({
   userId: z.string().uuid(),
   homeworkId: z.string().uuid(),
+  submissionDate: z.iso.datetime(),
   grade: z.string().trim().min(1).max(100),
   analysisText: z.string().trim().max(5_000).optional(),
 });

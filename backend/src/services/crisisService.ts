@@ -70,10 +70,7 @@ export const analyzeCrisisRisk = async (
     log.warn('Crisis screen returned an unexpected value');
     return 'unavailable';
   } catch (error) {
-    log.error(
-      { err: error instanceof Error ? error.message : String(error) },
-      'Crisis screen unavailable',
-    );
+    log.error({ err: error }, 'Crisis screen unavailable');
     return 'unavailable';
   }
 };

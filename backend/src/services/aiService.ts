@@ -99,10 +99,7 @@ export class AIService {
         usage: response.data.usage,
       };
     } catch (error: unknown) {
-      const detail = axios.isAxiosError(error)
-        ? (error.response?.data ?? error.message)
-        : String(error);
-      log.error({ err: detail }, 'AIService generateText error');
+      log.error({ err: error }, 'AIService generateText error');
       throw new Error('Failed to generate text from AI via OpenRouter');
     }
   }
@@ -270,10 +267,7 @@ ${text.slice(0, 2_000)}
 
       return response.body;
     } catch (error: unknown) {
-      log.error(
-        { err: error instanceof Error ? error.message : String(error) },
-        'AIService generateTextStream error',
-      );
+      log.error({ err: error }, 'AIService generateTextStream error');
       throw new Error('Failed to start AI stream');
     }
   }
@@ -329,10 +323,7 @@ ${text.slice(0, 2_000)}
         usage: response.data.usage,
       };
     } catch (error: unknown) {
-      const detail = axios.isAxiosError(error)
-        ? (error.response?.data ?? error.message)
-        : String(error);
-      log.error({ err: detail }, 'AIService analyzeImage error');
+      log.error({ err: error }, 'AIService analyzeImage error');
       throw new Error('Failed to analyze image with AI via OpenRouter');
     }
   }

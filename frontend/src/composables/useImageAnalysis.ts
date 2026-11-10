@@ -194,7 +194,7 @@ export function useImageAnalysis() {
         errorMessage.value = 'Не удалось извлечь анализ из ответа API.';
       }
     } catch (apiError) {
-      console.error('Error during backend image analysis call:', apiError);
+      console.error('Error during backend image analysis call:');
       if (axios.isAxiosError(apiError) && apiError.response) {
         errorMessage.value = `Ошибка: ${apiError.response.data?.error || 'Не удалось выполнить анализ'}`;
       } else {
@@ -275,7 +275,7 @@ export function useImageAnalysis() {
         errorMessage.value = 'Не удалось извлечь расширенный анализ из ответа API.';
       }
     } catch (apiError) {
-      console.error('Error during backend extended analysis call:', apiError);
+      console.error('Error during backend extended analysis call:');
       if (axios.isAxiosError(apiError) && apiError.response) {
         errorMessage.value = `Ошибка: ${apiError.response.data?.error || 'Не удалось выполнить анализ'}`;
       } else {

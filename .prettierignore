@@ -12,3 +12,4 @@ frontend/src/assets/
 playwright-report/
 test-results/
 artifacts/
+.impeccable/hook.cache.json

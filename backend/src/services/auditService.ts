@@ -1,20 +1,13 @@
-// Centralised audit trail for security- and privacy-relevant actions.
-//
-// This is deliberately separate from the operational application log. The
-// operational log is tuned for debugging (level-filtered, sampled, often
-// shipped to a third-party aggregator); an audit trail must be complete,
-// tamper-evident in intent, and readable by whoever handles a data-subject
-// request or investigates a breach. `audit` entries are emitted at `info` on a
-// dedicated `audit` logger so an operator can route them to a separate,
-// append-only sink without touching the rest of the logging.
-//
-// Every entry records WHO did WHAT to WHICH record. Nothing that identifies a
-// user's diary, chat or health content is ever written here — see the
-// `logger.ts` redaction list.
+// Security events share the JSON transport; route module=audit to a protected sink.
+// A raised operational log level must not suppress successful security events.
+import { logger, requestContext } from '../config/logger';
 
-import { createLogger } from '../config/logger';
-
-export const auditLogger = createLogger('audit');
+export const auditLogger = logger.child(
+  { module: 'audit' },
+  {
+    level: logger.level === 'silent' ? 'silent' : 'info',
+  },
+);
 
 /**
  * Actions worth an audit entry. Kept as a union so a typo becomes a compile
@@ -27,6 +20,9 @@ export type AuditAction =
   | 'auth.logout_all'
   | 'auth.register'
   | 'auth.password_changed'
+  | 'auth.password_reset'
+  | 'admin.gallery_moderated'
+  | 'admin.gallery_restored'
   | 'account.exported'
   | 'account.deleted'
   | 'consent.ai_granted'
@@ -73,7 +69,7 @@ export function recordAudit(entry: AuditEntry): void {
         outcome: entry.outcome,
         actorId: entry.actorId,
         subjectId: entry.subjectId,
-        requestId: entry.requestId,
+        requestId: entry.requestId ?? requestContext.getStore()?.requestId,
         ip: entry.ip,
         ...entry.meta,
       },

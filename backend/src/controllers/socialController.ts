@@ -10,7 +10,14 @@ const log = createLogger('socialController');
 export const getPublicGallery = async (req: AuthRequest, res: Response) => {
   try {
     const images = await prisma.imageAnalysis.findMany({
-      where: { isPublic: true },
+      where: {
+        isPublic: true,
+        moderationStatus: 'VISIBLE',
+        hiddenBy:
+          req.query.hidden === 'true'
+            ? { some: { userId: req.user?.id } }
+            : { none: { userId: req.user?.id } },
+      },
       orderBy: { date: 'desc' },
       take: 20,
     });
@@ -38,9 +45,18 @@ export const togglePublic = async (req: AuthRequest, res: Response) => {
   const { id, isPublic } = validation.data;
 
   try {
+    if (
+      isPublic &&
+      (await prisma.imageAnalysis.findFirst({
+        where: { id, userId: req.user.id, moderationStatus: 'BLOCKED' },
+      }))
+    )
+      return res
+        .status(403)
+        .json({ error: 'Публикация скрыта модератором. Повторная публикация недоступна.' });
     // Scope to the owner: a mismatch changes zero rows rather than erroring.
     const { count } = await prisma.imageAnalysis.updateMany({
-      where: { id, userId: req.user.id },
+      where: { id, userId: req.user.id, ...(isPublic ? { moderationStatus: 'VISIBLE' } : {}) },
       data: { isPublic },
     });
     if (count === 0) return res.status(404).json({ error: 'Image not found' });
@@ -65,7 +81,7 @@ export const likePost = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
   try {
     const image = await prisma.imageAnalysis.findFirst({
-      where: { id, isPublic: true },
+      where: { id, isPublic: true, moderationStatus: 'VISIBLE' },
       select: { id: true, likes: true },
     });
     if (!image) return res.status(404).json({ error: 'Image not found' });

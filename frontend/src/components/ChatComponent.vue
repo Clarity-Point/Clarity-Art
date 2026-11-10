@@ -107,7 +107,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import VueMarkdown from 'vue-markdown-render';
 import EmergencyModal from './EmergencyModal.vue';
 import Icon from '@/components/Icon.vue';
@@ -131,9 +132,17 @@ const {
   clearSession,
 } = useChat();
 
+const route = useRoute();
 onMounted(async () => {
   await fetchSessions();
+  if (typeof route.query.session === 'string') await selectSession(route.query.session);
 });
+watch(
+  () => route.query.session,
+  (id) => {
+    if (typeof id === 'string') void selectSession(id);
+  },
+);
 </script>
 
 <style scoped>

@@ -51,6 +51,13 @@ export function useChat() {
    * the sidebar highlights a different one.
    */
   let historyRequestId = 0;
+  let disposed = false;
+  let activeController: AbortController | null = null;
+  onScopeDispose(() => {
+    disposed = true;
+    historyRequestId++;
+    activeController?.abort();
+  });
 
   // View-only helper: friendly date for the history list.
   const formatSessionDate = (date: string) => {
@@ -68,9 +75,9 @@ export function useChat() {
     isLoadingSessions.value = true;
     try {
       const response = await axios.get(`${API_URL}/ai/sessions`);
-      sessions.value = Array.isArray(response.data) ? response.data : [];
-    } catch (e) {
-      console.error('Failed to fetch sessions', e);
+      if (!disposed) sessions.value = Array.isArray(response.data) ? response.data : [];
+    } catch {
+      console.error('Failed to fetch sessions');
       sessions.value = [];
     } finally {
       isLoadingSessions.value = false;
@@ -78,6 +85,8 @@ export function useChat() {
   };
 
   const selectSession = async (id: string) => {
+    activeController?.abort();
+    isStreaming.value = false;
     const requestId = ++historyRequestId;
     currentSessionId.value = id;
     isLoadingHistory.value = true;
@@ -93,9 +102,9 @@ export function useChat() {
           timestamp: m.createdAt,
         }),
       );
-    } catch (e) {
+    } catch {
       if (requestId !== historyRequestId) return;
-      console.error('Failed to fetch history', e);
+      console.error('Failed to fetch history');
       messages.value = [];
       historyError.value = 'Не удалось загрузить историю беседы. Попробуйте ещё раз.';
     } finally {
@@ -104,7 +113,8 @@ export function useChat() {
   };
 
   const sendMessage = async () => {
-    if (newMessage.value.trim() === '' || isStreaming.value) return;
+    if (newMessage.value.trim() === '' || isStreaming.value || isLoadingHistory.value || disposed)
+      return;
 
     const userMessageText = newMessage.value;
     messages.value.push({
@@ -120,24 +130,13 @@ export function useChat() {
     const aiMessageIndex =
       messages.value.push({ text: '', sender: 'ИИ', timestamp: new Date().toISOString() }) - 1;
 
-    /*
-     * Aborted when the component is torn down mid-stream. Without it the read
-     * loop keeps running against a view that no longer exists: the socket stays
-     * open, every chunk still triggers a reactive write, and a user who quickly
-     * leaves the page pays for the full generation.
-     */
     const controller = new AbortController();
-    let disposed = false;
-    const stop = () => {
-      disposed = true;
-      controller.abort();
-    };
-    onScopeDispose(stop);
+    activeController = controller;
 
     try {
       const response = await fetch(`${API_URL}/chat/stream`, {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMessageText, sessionId: currentSessionId.value }),
         signal: controller.signal,
@@ -160,6 +159,7 @@ export function useChat() {
       let buffer = '';
 
       const processEvent = (event: string) => {
+        if (controller.signal.aborted) return;
         for (const line of event.split('\n')) {
           if (!line.startsWith('data: ')) continue;
           const dataStr = line.slice(6);
@@ -188,10 +188,11 @@ export function useChat() {
       }
       buffer += decoder.decode();
       if (buffer.trim()) processEvent(buffer);
-      await fetchSessions(); // Refresh sessions list
+      if (!controller.signal.aborted) await fetchSessions();
     } catch (error) {
-      if (disposed) return;
-      console.error('Error sending message:', error);
+      if (controller.signal.aborted) return;
+      console.error('Error sending message:');
+      if (!newMessage.value) newMessage.value = userMessageText;
       messages.value[aiMessageIndex].text =
         error instanceof Error && error.message === 'AI_CONSENT_REQUIRED'
           ? 'Для внешнего AI-провайдера нужно ваше согласие. Откройте «Профиль → Терапевт и данные».'
@@ -199,11 +200,17 @@ export function useChat() {
     } finally {
       // Only clear the flag if this request still owns it: an aborted stream
       // must not unlock the input box of whatever replaced it.
-      if (!disposed) isStreaming.value = false;
+      if (activeController === controller) {
+        isStreaming.value = false;
+        activeController = null;
+      }
     }
   };
 
   const clearSession = () => {
+    activeController?.abort();
+    activeController = null;
+    isStreaming.value = false;
     // Invalidate any in-flight history load so it cannot repopulate the pane
     // after the user has deliberately cleared it.
     historyRequestId += 1;

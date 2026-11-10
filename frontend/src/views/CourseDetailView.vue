@@ -41,6 +41,52 @@
           <p class="course-description">{{ course.description }}</p>
         </section>
 
+        <section
+          v-if="selectedLesson"
+          id="lesson-reader"
+          class="card stack lesson-reader"
+          aria-labelledby="lesson-heading"
+        >
+          <p class="muted">Урок {{ selectedIndex + 1 }} из {{ lessons.length }}</p>
+          <h2 id="lesson-heading" tabindex="-1">{{ selectedLesson.title }}</h2>
+          <VueMarkdown v-if="selectedLesson.content" :source="selectedLesson.content" />
+          <p v-else class="muted">
+            Материал этого урока пока готовится. Вы можете перейти к следующему уроку.
+          </p>
+          <div class="row lesson-navigation">
+            <button
+              class="btn-outline"
+              :disabled="selectedIndex === 0"
+              @click="openLesson(lessons[selectedIndex - 1]!.id)"
+            >
+              Предыдущий урок
+            </button>
+            <button
+              class="btn-primary"
+              :disabled="progressSaving"
+              @click="toggleLesson(selectedLesson.id)"
+            >
+              {{
+                isLessonCompleted(selectedLesson.id)
+                  ? 'Снять отметку о прохождении'
+                  : 'Урок пройден'
+              }}
+            </button>
+            <button
+              class="btn-outline"
+              :disabled="selectedIndex === lessons.length - 1"
+              @click="openLesson(lessons[selectedIndex + 1]!.id)"
+            >
+              Следующий урок
+            </button>
+          </div>
+          <p v-if="positionError" role="alert">
+            {{ positionError }}
+            <button class="btn-ghost" @click="openLesson(selectedLesson.id)">
+              Повторить сохранение позиции
+            </button>
+          </p>
+        </section>
         <section v-if="course.targetAudience?.length" class="card">
           <div class="section-head"><h2 class="section-title">Для кого этот курс</h2></div>
           <ul class="tick-list">
@@ -71,9 +117,18 @@
               </div>
               <ul class="lesson-list">
                 <li v-for="lesson in module.lessons" :key="lesson.id" class="lesson-item">
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    :aria-current="selectedLesson?.id === lesson.id ? 'step' : undefined"
+                    @click="openLesson(lesson.id)"
+                  >
+                    Читать: {{ lesson.title }}
+                  </button>
                   <label class="lesson-main">
                     <input
                       type="checkbox"
+                      :disabled="progressSaving"
                       :checked="isLessonCompleted(lesson.id)"
                       @change="toggleLesson(lesson.id)"
                     />
@@ -137,7 +192,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import axios from 'axios';
+import VueMarkdown from 'vue-markdown-render';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import { useCoursesStore } from '@/stores/coursesStore';
 import { useUserProfileStore } from '@/stores/userProfileStore';
@@ -165,11 +222,45 @@ const { profile } = storeToRefs(userProfileStore);
 
 const courseId = computed(() => route.params.courseId as string);
 const progressError = ref('');
+const positionError = ref('');
+const progressSaving = ref(false);
+const selectedId = ref('');
+const lessons = computed(() =>
+  (course.value?.modules || []).flatMap((module) => module.lessons || []),
+);
+const selectedIndex = computed(() =>
+  lessons.value.findIndex((lesson) => lesson.id === selectedId.value),
+);
+const selectedLesson = computed(() => lessons.value[selectedIndex.value]);
+async function openLesson(id: string) {
+  if (!lessons.value.some((lesson) => lesson.id === id)) return;
+  selectedId.value = id;
+  positionError.value = '';
+  const slug = courseId.value;
+  await nextTick();
+  document.getElementById('lesson-heading')?.focus({ preventScroll: true });
+  document.getElementById('lesson-reader')?.scrollIntoView({ block: 'start' });
+  try {
+    await axios.put(`${import.meta.env.VITE_API_URL || '/api'}/courses/${slug}/position`, {
+      lessonId: id,
+    });
+    const entry = profile.value.courseProgress.find((item) => item.courseId === slug);
+    if (entry) entry.lastLessonId = id;
+  } catch {
+    if (courseId.value === slug) positionError.value = 'Не удалось сохранить позицию чтения.';
+  }
+}
 
 const loadCourse = async () => {
   progressError.value = '';
   if (courseId.value) {
+    selectedId.value = '';
     await coursesStore.fetchCourseById(courseId.value);
+    const resume = profile.value.courseProgress.find(
+      (item) => item.courseId === courseId.value,
+    )?.lastLessonId;
+    selectedId.value =
+      lessons.value.find((lesson) => lesson.id === resume)?.id || lessons.value[0]?.id || '';
   }
 };
 
@@ -190,7 +281,7 @@ const isLessonCompleted = (lessonId: string) => {
 };
 
 const toggleLesson = async (lessonId: string) => {
-  if (!course.value) return;
+  if (!course.value || progressSaving.value) return;
 
   const progressEntry = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
   let completedLessons = progressEntry ? [...(progressEntry.completedLessons || [])] : [];
@@ -202,7 +293,12 @@ const toggleLesson = async (lessonId: string) => {
     completedLessons.push(lessonId);
   }
 
-  await updateProgress(completedLessons);
+  progressSaving.value = true;
+  try {
+    await updateProgress(completedLessons);
+  } finally {
+    progressSaving.value = false;
+  }
 };
 
 const updateProgress = async (completedLessons: string[]) => {
@@ -289,6 +385,21 @@ watch(
 </script>
 
 <style scoped>
+.lesson-navigation {
+  flex-wrap: wrap;
+}
+.lesson-reader {
+  scroll-margin-top: var(--header-h);
+  overflow-wrap: anywhere;
+}
+.lesson-reader :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+.lesson-reader :deep(pre) {
+  overflow: auto;
+  max-width: 100%;
+}
 .course-detail-view {
   min-width: 0;
   width: 100%;

@@ -12,15 +12,14 @@ export const globalErrorHandler = (
   err: AppError,
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ) => {
+  if (res.headersSent) return next(err);
   const proposedStatus = err.statusCode ?? err.status ?? 500;
   const statusCode =
     Number.isInteger(proposedStatus) && proposedStatus >= 400 && proposedStatus <= 599
       ? proposedStatus
       : 500;
-  // Never leak internal error details to the client for server-side (5xx) errors;
-  // the full message and stack are still recorded in the server log below.
   const message =
     err.type === 'entity.parse.failed'
       ? 'Некорректный JSON в запросе'
@@ -28,19 +27,15 @@ export const globalErrorHandler = (
         ? 'Internal server error'
         : err.message || 'Invalid request';
 
-  logger.error(
+  logger[statusCode >= 500 ? 'error' : 'warn'](
     {
       requestId: req.id,
       method: req.method,
-      url: req.url,
-      err: {
-        // JSON parser errors can embed raw request bodies, including passwords.
-        message: err.type === 'entity.parse.failed' ? 'Invalid JSON body' : err.message,
-        stack: err.type === 'entity.parse.failed' ? undefined : err.stack,
-        statusCode,
-      },
+      path: typeof req.route?.path === 'string' ? req.route.path : '[unmatched]',
+      statusCode,
+      err,
     },
-    `${req.method} ${req.url} failed`,
+    'HTTP request failed',
   );
 
   res.status(statusCode).json({

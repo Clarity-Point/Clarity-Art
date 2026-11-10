@@ -5,7 +5,7 @@ import { createLogger } from '../config/logger';
 
 const log = createLogger('gamification');
 
-export const rewardPoints = async (userId: string, points: number, _reason?: string) => {
+export const rewardPoints = async (userId: string, points: number) => {
   await prisma.user.update({
     where: { id: userId },
     data: { points: { increment: points } },

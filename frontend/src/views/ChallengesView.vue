@@ -107,8 +107,8 @@ const fetchChallenges = async () => {
     errorMessage.value = '';
     const response = await axios.get(`${API_URL}/challenges`);
     challenges.value = response.data;
-  } catch (error) {
-    console.error('Failed to fetch challenges:', error);
+  } catch {
+    console.error('Failed to fetch challenges:');
     errorMessage.value = 'Не удалось загрузить челленджи. Проверьте соединение и повторите.';
   } finally {
     isLoading.value = false;
@@ -120,7 +120,7 @@ const complete = async (id: string) => {
     await axios.post(`${API_URL}/challenges/complete`, { challengeId: id });
     await fetchChallenges();
   } catch (error) {
-    console.error('Failed to complete challenge:', error);
+    console.error('Failed to complete challenge:');
     errorMessage.value = axios.isAxiosError(error)
       ? error.response?.data?.error || 'Не удалось завершить челлендж.'
       : 'Не удалось завершить челлендж.';
@@ -134,7 +134,7 @@ const join = async (id: string) => {
     await axios.post(`${API_URL}/challenges/join`, { challengeId: id });
     await fetchChallenges();
   } catch (error) {
-    console.error('Failed to join challenge:', error);
+    console.error('Failed to join challenge:');
     errorMessage.value = axios.isAxiosError(error)
       ? error.response?.data?.error || 'Не удалось присоединиться к челленджу.'
       : 'Не удалось присоединиться к челленджу.';

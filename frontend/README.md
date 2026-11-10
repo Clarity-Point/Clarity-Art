@@ -23,4 +23,4 @@ Vite проксирует `/api` на `http://localhost:3100`; адрес мож
 
 [Карта проекта](../docs/architecture/project-map.md) ·
 [Эксплуатация](../docs/operations/runbook.md) ·
-[Аудит](../docs/audits/2026-10-16.md)
+[Аудит](../docs/audits/2026-11-10.md)

@@ -23,6 +23,7 @@ export interface ImageAnalysisEntry {
 }
 
 export interface CourseProgressEntry {
+  lastLessonId?: string | null;
   courseId: string;
   courseName: string;
   progress: number;
@@ -199,8 +200,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       if (revision !== profileRevision) return false;
       profile.value = { ...profile.value, ...newProfile };
       return true;
-    } catch (e) {
-      console.error('Failed to sync profile with backend', e);
+    } catch {
+      console.error('Failed to sync profile with backend');
       return false;
     }
   }
@@ -219,8 +220,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
         completedDate: response.data.progress === 100 ? new Date().toISOString() : undefined,
         lastAccessed: new Date().toISOString(),
       };
-    } catch (e) {
-      console.error('Failed to sync course progress with backend', e);
+    } catch {
+      console.error('Failed to sync course progress with backend');
       return false;
     }
 
@@ -265,8 +266,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
         if (progressIndex >= 0) profile.value.courseProgress[progressIndex] = canonicalProgress;
         else profile.value.courseProgress.push(canonicalProgress);
       }
-    } catch (e) {
-      console.error('Failed to sync homework with backend', e);
+    } catch {
+      console.error('Failed to sync homework with backend');
       return false;
     }
 
@@ -294,8 +295,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
       profile.value.points += 10; // Immediate feedback
       analyticsStore.recordActivity();
       return true;
-    } catch (e) {
-      console.error('Failed to sync diary with backend', e);
+    } catch {
+      console.error('Failed to sync diary with backend');
       return false;
     }
   }
@@ -318,8 +319,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
           date: response.data.date,
           analysis: { ...current.analysis, mood: response.data.riskLevel },
         };
-      } catch (e) {
-        console.error('Failed to update diary on backend', e);
+      } catch {
+        console.error('Failed to update diary on backend');
         return false;
       }
 
@@ -334,8 +335,8 @@ export const useUserProfileStore = defineStore('userProfile', () => {
     try {
       await axios.delete(`${API_URL}/diary/${entryId}`);
       if (revision !== profileRevision) return false;
-    } catch (e) {
-      console.error('Failed to delete diary from backend', e);
+    } catch {
+      console.error('Failed to delete diary from backend');
       return false;
     }
 

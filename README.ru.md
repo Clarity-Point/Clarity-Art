@@ -171,7 +171,7 @@ cd frontend && npm run build                               # production-сбор
   "path": "/api/courses",
   "status": 200,
   "durationMs": 12.4,
-  "msg": "GET /api/courses 200",
+  "msg": "HTTP request completed",
 }
 ```
 
@@ -220,7 +220,7 @@ HTTPS-развёртывания также задайте `COOKIE_SECURE=true`,
 ## Навигация по проекту
 
 [Документация](docs/README.md) · [Карта проекта](docs/architecture/project-map.md) ·
-[Эксплуатация](docs/operations/runbook.md) · [Аудит](docs/audits/2026-10-16.md).
+[Эксплуатация](docs/operations/runbook.md) · [Аудит](docs/audits/2026-11-10.md).
 
 Полная локальная проверка: `npm run check`. Браузерные проверки интерфейса:
 `npm run test:browser` (предварительно `npx playwright install chromium`).

@@ -50,8 +50,8 @@ export const useCoursesStore = defineStore('courses', () => {
     try {
       const response = await axios.get(`${API_URL}/courses`);
       courses.value = response.data;
-    } catch (error) {
-      console.error('Failed to fetch courses:', error);
+    } catch {
+      console.error('Failed to fetch courses:');
       courses.value = [];
       errorMessage.value = 'Не удалось загрузить курсы. Проверьте соединение.';
     } finally {
@@ -68,7 +68,7 @@ export const useCoursesStore = defineStore('courses', () => {
       currentCourse.value = response.data;
       return currentCourse.value;
     } catch (error) {
-      console.error(`Failed to fetch course ${id}:`, error);
+      console.error(`Failed to fetch course ${id}:`);
       errorMessage.value =
         axios.isAxiosError(error) && error.response?.status === 404
           ? 'Курс не найден.'
@@ -89,8 +89,8 @@ export const useCoursesStore = defineStore('courses', () => {
       }
       await fetchCourses();
       return true;
-    } catch (error) {
-      console.error('Failed to save course:', error);
+    } catch {
+      console.error('Failed to save course:');
       return false;
     }
   }

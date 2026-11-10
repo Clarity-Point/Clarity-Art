@@ -26,8 +26,8 @@ export const useAnalyticsStore = defineStore('analytics', () => {
               ? parsed.activityHistory
               : {},
         };
-      } catch (e) {
-        console.error('Failed to parse analytics data from localStorage', e);
+      } catch {
+        console.error('Failed to parse analytics data from localStorage');
       }
     }
     return {
@@ -45,8 +45,8 @@ export const useAnalyticsStore = defineStore('analytics', () => {
     (newStateValue) => {
       try {
         window.localStorage.setItem(ANALYTICS_STORAGE_KEY, JSON.stringify(newStateValue));
-      } catch (e) {
-        console.error('Failed to save analytics data to localStorage', e);
+      } catch {
+        console.error('Failed to save analytics data to localStorage');
       }
     },
     { deep: true },

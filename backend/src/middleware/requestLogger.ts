@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
-import { logger } from '../config/logger';
+import { logger, requestContext } from '../config/logger';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -26,27 +26,31 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
   req.id = requestId;
   res.setHeader('X-Request-Id', requestId);
 
-  if (IGNORED_PATHS.has(req.path)) return next();
-
   const startedAt = process.hrtime.bigint();
-
-  res.on('finish', () => {
+  let recorded = false;
+  const record = (aborted = false) => {
+    if (recorded) return;
+    recorded = true;
+    if (!aborted && res.statusCode < 400 && IGNORED_PATHS.has(req.path)) return;
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
-    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    const level =
+      res.statusCode >= 500 ? 'error' : aborted || res.statusCode >= 400 ? 'warn' : 'info';
+    const path = typeof req.route?.path === 'string' ? req.route.path : '[unmatched]';
 
     logger[level](
       {
         requestId,
         method: req.method,
-        path: req.path,
+        path,
         status: res.statusCode,
+        aborted,
         durationMs: Math.round(durationMs * 10) / 10,
-        ip: req.ip,
-        userAgent: req.get('user-agent'),
       },
-      `${req.method} ${req.path} ${res.statusCode}`,
+      'HTTP request completed',
     );
-  });
+  };
+  res.once('finish', () => record());
+  res.once('close', () => record(!res.writableFinished));
 
-  next();
+  requestContext.run({ requestId }, next);
 };

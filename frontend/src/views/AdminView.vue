@@ -251,9 +251,18 @@
                 <div
                   v-for="lesson in module.lessons"
                   :key="lesson.id || lesson.title"
-                  class="builder-row"
+                  class="builder-row lesson-builder-row"
                 >
                   <span>{{ lesson.title }}</span>
+                  <LessonEditor
+                    :lesson="lesson"
+                    @saved="
+                      (title, content) => {
+                        lesson.title = title;
+                        lesson.content = content;
+                      }
+                    "
+                  />
                   <button
                     v-if="lesson.id"
                     type="button"
@@ -385,6 +394,7 @@
 </template>
 
 <script setup lang="ts">
+import LessonEditor from '@/components/LessonEditor.vue';
 import { ref, computed, onMounted } from 'vue';
 import { useCoursesStore, type Course, type CourseDraft } from '@/stores/coursesStore';
 import { storeToRefs } from 'pinia';
@@ -472,8 +482,8 @@ const fetchSubmissions = async () => {
   try {
     const response = await axios.get(`${API_URL}/admin/submissions`);
     submissions.value = Array.isArray(response.data) ? response.data : [];
-  } catch (e) {
-    console.error(e);
+  } catch {
+    console.error('Request failed');
     /*
      * Without this the list silently falls back to its empty state, so a failed
      * request looked exactly like "nobody has submitted anything" — and an
@@ -596,13 +606,18 @@ const submitGrade = async () => {
     await axios.post(`${API_URL}/admin/submissions/grade`, {
       userId: currentSub.value.userId,
       homeworkId: currentSub.value.homeworkId,
+      submissionDate: currentSub.value.submissionDate,
       ...gradeForm.value,
     });
     showGradeModal.value = false;
     fetchSubmissions();
     toastStore.success('Оценка и обратная связь сохранены.');
-  } catch {
-    toastStore.error('Не удалось сохранить оценку. Попробуйте ещё раз.');
+  } catch (error) {
+    toastStore.error(
+      axios.isAxiosError(error) && error.response?.status === 409
+        ? 'Работа изменена или удалена. Обновите список и откройте её заново.'
+        : 'Не удалось сохранить оценку. Попробуйте ещё раз.',
+    );
   }
 };
 </script>
@@ -630,6 +645,17 @@ const submitGrade = async () => {
   justify-content: space-between;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+.lesson-builder-row {
+  flex-wrap: wrap;
+}
+.lesson-builder-row > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lesson-builder-row > :deep(.lesson-editor) {
+  order: 1;
 }
 .builder-add input {
   flex: 1;
