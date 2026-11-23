@@ -9,7 +9,7 @@ export class AnalyticsService {
     }[riskLevel];
   }
 
-  static async logSentiment(userId: string, riskLevel: string, tags: string[], _content: string) {
+  static async logSentiment(userId: string, riskLevel: string, tags: string[]) {
     // An unavailable automated screen must not be converted into a pseudo-clinical
     // score or used to trigger trend notifications.
     if (riskLevel === 'unavailable') return null;
@@ -29,9 +29,6 @@ export class AnalyticsService {
 
     // Check for sharp drops to create notifications
     await this.checkAndNotify(userId, score);
-
-    // Update profile attention score
-    await this.updateAttentionScore(userId);
 
     return trend;
   }

@@ -11,7 +11,7 @@ export default defineConfig({
     environmentOptions: {
       jsdom: { url: 'http://localhost/' },
     },
-    exclude: ['dist/**', 'node_modules/**'],
+    include: ['tests/**/*.test.ts'],
   },
   resolve: {
     alias: { '@': new URL('./src', import.meta.url).pathname },

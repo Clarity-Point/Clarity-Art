@@ -324,7 +324,7 @@ const activeMethod = ref<'upload' | 'draw'>('upload');
 
 // --- View-only: pen colour swatches shown as round buttons ---
 const colorSwatches = [
-  { color: 'black', label: 'Чёрный' },
+  { color: '#000000', label: 'Чёрный' },
   { color: 'red', label: 'Красный' },
   { color: 'blue', label: 'Синий' },
   { color: 'green', label: 'Зелёный' },

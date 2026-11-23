@@ -87,6 +87,7 @@ import {
   isOrgAdmin,
   isTherapist,
   requireAIConsent,
+  requireExpectedUser,
 } from './middleware/auth';
 import { updateStreak } from './middleware/gamification';
 import { globalErrorHandler } from './middleware/errorHandler';
@@ -100,6 +101,7 @@ import { processImageDeletions } from './services/imageDeletionService';
 import { getDraft, saveDraft } from './controllers/draftController';
 import { requestPasswordReset, resetPassword } from './controllers/passwordResetController';
 import { getHistory } from './controllers/historyController';
+import { practiceRouter, therapistPracticeRouter } from './routes/practiceRoutes';
 import {
   listMoodCheckIns,
   saveMoodCheckIn,
@@ -149,7 +151,7 @@ app.use(requestLogger);
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Expected-User-Id'],
   exposedHeaders: [
     'X-Request-Id',
     'X-Next-Cursor',
@@ -247,8 +249,8 @@ const recoveryLimiter = rateLimit({
 });
 app.post('/api/auth/forgot-password', recoveryLimiter, requestPasswordReset);
 app.post('/api/auth/reset-password', recoveryLimiter, resetPassword);
-app.get('/api/drafts/:kind/:key', authenticateToken, getDraft);
-app.put('/api/drafts/:kind/:key', authenticateToken, saveDraft);
+app.get('/api/drafts/:kind/:key', authenticateToken, requireExpectedUser, getDraft);
+app.put('/api/drafts/:kind/:key', authenticateToken, requireExpectedUser, saveDraft);
 app.get('/api/history', authenticateToken, getHistory);
 app.get('/api/mood-checkins', authenticateToken, listMoodCheckIns);
 app.put('/api/mood-checkins', authenticateToken, saveMoodCheckIn);
@@ -259,7 +261,7 @@ app.get('/api/admin/reports', authenticateToken, isAdmin, listReports);
 app.post('/api/admin/reports/:id/resolve', authenticateToken, isAdmin, resolveReport);
 app.post('/api/admin/gallery/:id/restore', authenticateToken, isAdmin, restoreImage);
 app.put('/api/courses/:courseSlug/position', authenticateToken, saveCoursePosition);
-app.get('/api/homework/:id', authenticateToken, getHomework);
+app.get('/api/homework/:id', authenticateToken, requireExpectedUser, getHomework);
 app.put('/api/admin/lessons/:id', authenticateToken, isAdmin, updateLesson);
 
 // Auth
@@ -295,12 +297,14 @@ app.post('/api/org/peer-support', authenticateToken, postPeerSupport);
 app.get('/api/therapist/patients', authenticateToken, isTherapist, getPatients);
 app.get('/api/therapists', authenticateToken, getAvailableTherapists);
 app.put('/api/profile/therapist-access', authenticateToken, updateTherapistAccess);
+app.use('/api/therapist/practice-shares', therapistPracticeRouter);
+app.use('/api/practices', practiceRouter);
 
 // Courses
 app.get('/api/courses', getAllCourses);
 app.get('/api/courses/:slug', getCourseBySlug);
 app.post('/api/courses/:courseSlug/progress', authenticateToken, updateStreak, updateProgress);
-app.post('/api/homework', authenticateToken, updateStreak, submitHomework);
+app.post('/api/homework', authenticateToken, requireExpectedUser, updateStreak, submitHomework);
 
 // AI
 app.post('/api/chat', authenticateToken, requireAIConsent, updateStreak, aiLimiter, chat);
@@ -325,7 +329,7 @@ app.post(
 );
 
 // Diary
-app.post('/api/diary', authenticateToken, updateStreak, createDiaryEntry);
+app.post('/api/diary', authenticateToken, requireExpectedUser, updateStreak, createDiaryEntry);
 app.get('/api/diary', authenticateToken, getDiaryEntries);
 app.get('/api/diary/:id', authenticateToken, getDiaryEntry);
 app.put('/api/diary/:id', authenticateToken, updateStreak, updateDiaryEntry);
@@ -344,7 +348,13 @@ app.post('/api/gallery/like/:id', authenticateToken, likePost);
 app.put('/api/gallery/toggle-public', authenticateToken, togglePublic);
 app.post('/api/profile/health', authenticateToken, createHealthMetric);
 app.get('/api/profile/export-pdf', authenticateToken, heavyLimiter, exportDiaryPDF);
-app.get('/api/account/export', authenticateToken, heavyLimiter, exportAccountData);
+app.get(
+  '/api/account/export',
+  authenticateToken,
+  requireExpectedUser,
+  heavyLimiter,
+  exportAccountData,
+);
 
 // Notifications
 app.get('/api/notifications', authenticateToken, getNotifications);

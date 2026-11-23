@@ -2,10 +2,27 @@
 
 ## Локальная разработка
 
-Используйте Node.js 22.12+ и PostgreSQL 16 либо Docker Compose.
+### Docker Compose
+
+Скопируйте `.env.example` в `.env` в корне и задайте `JWT_SECRET` и
+`POSTGRES_PASSWORD`. Запустите стек разработки и примените миграции.
 
 ```bash
-npm ci
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml exec backend npx prisma migrate deploy
+```
+
+Приложение открывается на [localhost:5173](http://localhost:5173), API работает на
+порту 3100, Swagger доступен на [localhost:3100/api-docs](http://localhost:3100/api-docs).
+
+### Запуск на хосте
+
+Используйте свежий патч Node.js 22 и PostgreSQL 16. Базу также можно запустить
+через `docker compose -f docker-compose.dev.yml up -d db`. Она по умолчанию
+доступна с хоста на порту 5433.
+
+```bash
+npm ci --include=dev
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
@@ -20,7 +37,39 @@ npm start
 ```
 
 Демо-наполнение запускайте только в тестовой базе: `npm run prisma:seed -w backend`.
-Учётные записи из seed имеют известные пароли; не наполняйте ими публичную установку.
+Адреса и пароль демо-аккаунтов заданы в [seed.js](../../backend/prisma/seed.js).
+Для презентационного наполнения временной базы после seed запустите
+`(cd backend && node prisma/enrich-demo.js)`. Скрипт пересоздаёт записи демо-аккаунтов
+и сообщения демонстрационной организации.
+
+В корне доступны `npm run dev -w frontend`, `npm run build -w frontend` и
+`npm test -w frontend`. Vite проксирует `/api` на `http://localhost:3100`.
+Адрес прокси меняется через `VITE_PROXY_TARGET`. В собранном приложении API
+доступен по `/api` на том же origin. При раздельном размещении согласуйте CORS,
+cookie и CSP.
+
+## Настройка AI
+
+Приложение поддерживает OpenAI-совместимый `/chat/completions`. Без настроенного
+провайдера чат и анализ рисунков возвращают встроенные ответы.
+
+Для backend, запущенного на хосте, пример настройки в `backend/.env` выглядит так.
+
+```dotenv
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=llama3.1
+AI_VISION_MODEL=llava
+AI_DATA_PROCESSING_MODE=local
+```
+
+В Docker Compose задайте эти переменные в корневом `.env`. Адрес `AI_BASE_URL`
+должен быть доступен из контейнера backend. Для провайдера в той же сети Compose
+используйте имя его сервиса.
+
+Указывайте `local` только для провайдера на собственной инфраструктуре.
+Для внешнего сервиса задайте `external` и при необходимости `AI_API_KEY`.
+Внешняя обработка требует явного согласия, которое пользователь может отозвать
+в профиле. Встроенная конфигурация OpenRouter всегда использует внешний режим.
 
 ## Проверки перед изменением окружения
 
@@ -41,11 +90,25 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser
 тестовая база и пользователи всех ролей. CI дополнительно применяет миграции к
 чистой PostgreSQL и сравнивает схему, собирает Docker-образы.
 
+Для локального аналога стадии CI используйте временную базу с применёнными
+миграциями. Проверка зависимостей всегда включает дерево инструментов разработки.
+
+```bash
+RUN_DATABASE_TESTS=true DATABASE_URL='postgresql://user:password@localhost:5432/clarity_test' npm run check
+```
+
+Проверки SMTP запускают локальный тестовый сервер. Результаты и ограничения
+описаны в [аудите](../audits/2026-11-23.md).
+
 ## Публикация и запуск
 
 Workflow публикации образов зависит от полного CI. Он формирует SBOM и provenance.
 Staging публикуется после успешного CI для push в main. Публикация образа сама
 по себе не является проверкой доступности развёрнутого сервиса.
+
+Compose использует образы `ghcr.io/clarity-point/clarity-art-backend` и
+`ghcr.io/clarity-point/clarity-art-frontend`. Для установки определённого
+релиза задайте `BACKEND_IMAGE` и `FRONTEND_IMAGE` в `.env`.
 
 В production задайте `NODE_ENV=production`, точный `FRONTEND_URL` с протоколом и
 портом, сильные пароли БД, HTTPS и `COOKIE_SECURE=true`. `FRONTEND_URL` задаёт также
@@ -103,16 +166,6 @@ readiness, свободного диска и ошибок AI. Целевые SL
 доступом и согласованным сроком хранения: сам stdout не обеспечивает неизменяемость.
 Успешные health-пробы пропускаются, ошибки readiness и обрывы клиента записываются;
 у последних `aborted=true`, HTTP-статус может отражать уже отправленные заголовки.
-
-Полный проход с БД выполняется только на отдельной тестовой базе:
-
-```bash
-RUN_DATABASE_TESTS=true DATABASE_URL='postgresql://user:password@localhost:5432/clarity_test' npm run check
-```
-
-Перед ним примените миграции. Проверки SMTP используют локальный тестовый сервер
-и не отправляют реальные письма. Сведения о текущем покрытии и ограничениях:
-[аудит 11 ноября](../audits/2026-11-11.md).
 
 ## Повторное удаление рисунков
 

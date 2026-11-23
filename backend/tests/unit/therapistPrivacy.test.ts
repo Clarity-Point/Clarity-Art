@@ -1,0 +1,49 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { findMany, count } = vi.hoisted(() => ({ findMany: vi.fn(), count: vi.fn() }));
+
+vi.mock('../../src/config/prisma', () => ({
+  default: { user: { findMany, count } },
+}));
+
+import { getPatients } from '../../src/controllers/therapistController';
+
+describe('therapist patient privacy', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('queries only the patient fields used by the therapist UI', async () => {
+    findMany.mockResolvedValue([]);
+    count.mockResolvedValue(0);
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await getPatients(
+      { user: { id: 'therapist-1' }, query: {} } as never,
+      { json, status, setHeader: vi.fn() } as never,
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: {
+          id: true,
+          email: true,
+          streak: true,
+          points: true,
+          profile: {
+            select: { name: true, attentionScore: true, sleepHours: true },
+          },
+          diaryEntries: expect.objectContaining({
+            select: { id: true, content: true, date: true, riskLevel: true, tags: true },
+          }),
+          chatSessions: expect.objectContaining({
+            select: { id: true, date: true, riskLevel: true },
+          }),
+        },
+      }),
+    );
+    const query = findMany.mock.calls[0][0];
+    expect(query.include).toBeUndefined();
+    expect(query.select.password).toBeUndefined();
+    expect(query.select.sessionVersion).toBeUndefined();
+  });
+});

@@ -16,21 +16,28 @@ export function useServerDraft(text: Ref<string>, kind: 'diary' | 'homework', ke
   let generation = 0;
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let pending: Promise<boolean> | null = null;
+  const pending = new Map<string, Promise<boolean>>();
   const dirty = computed(() => draftReady.value && text.value !== saved.value);
   const url = () => `${API}/drafts/${kind}/${encodeURIComponent(key.value)}`;
+  const pendingKey = (userId: string, endpoint: string) => JSON.stringify([userId, endpoint]);
   const reloadDraft = async () => {
     const current = ++generation;
     clearTimeout(timer);
+    saving.value = false;
     draftReady.value = false;
     draftError.value = '';
     draftState.value = 'Загружаем черновик…';
     text.value = '';
     saved.value = '';
     version = 0;
-    if (!auth.user?.id || !key.value) return;
+    const userId = auth.user?.id;
+    if (!userId || !key.value) return;
+    const endpoint = url();
+    const previousSave = pending.get(pendingKey(userId, endpoint));
+    if (previousSave) await previousSave;
+    if (disposed || current !== generation) return;
     try {
-      const response = await axios.get(url());
+      const response = await axios.get(endpoint, { headers: { 'X-Expected-User-Id': userId } });
       if (disposed || current !== generation) return;
       text.value = typeof response.data.text === 'string' ? response.data.text : '';
       saved.value = text.value;
@@ -47,20 +54,27 @@ export function useServerDraft(text: Ref<string>, kind: 'diary' | 'homework', ke
   };
   const flushDraft = async (): Promise<boolean> => {
     clearTimeout(timer);
-    if (!draftReady.value) return false;
-    if (pending) {
-      await pending;
-      return dirty.value ? flushDraft() : !draftError.value;
+    const userId = auth.user?.id;
+    if (disposed || !draftReady.value || !userId) return false;
+    const current = generation;
+    const endpoint = url();
+    const operationKey = pendingKey(userId, endpoint);
+    const previousSave = pending.get(operationKey);
+    if (previousSave) {
+      const result = await previousSave;
+      return result && current === generation ? flushDraft() : false;
     }
     if (!dirty.value) return true;
-    const current = generation;
     const snapshot = text.value;
-    const endpoint = url();
     saving.value = true;
     draftState.value = 'Сохраняем черновик…';
-    pending = (async () => {
+    const save = (async () => {
       try {
-        const response = await axios.put(endpoint, { text: snapshot, version });
+        const response = await axios.put(
+          endpoint,
+          { text: snapshot, version },
+          { headers: { 'X-Expected-User-Id': userId } },
+        );
         if (disposed || current !== generation) return false;
         version = response.data.version;
         saved.value = snapshot;
@@ -70,19 +84,27 @@ export function useServerDraft(text: Ref<string>, kind: 'diary' | 'homework', ke
       } catch (error) {
         if (current !== generation || disposed) return false;
         draftState.value = '';
-        draftError.value =
-          axios.isAxiosError(error) && error.response?.status === 409
-            ? 'Черновик изменён в другой вкладке. Скопируйте свой текст перед загрузкой сохранённой версии.'
-            : 'Не удалось сохранить черновик. Текст остаётся в форме. Повторите сохранение.';
+        const response = axios.isAxiosError(error) ? error.response : undefined;
+        if (response?.data?.code === 'SESSION_CHANGED') {
+          draftError.value =
+            'Аккаунт изменился в другой вкладке. Скопируйте текст и обновите страницу.';
+        } else if (response?.status === 409) {
+          draftError.value =
+            'Черновик изменён в другой вкладке. Скопируйте свой текст перед загрузкой сохранённой версии.';
+        } else {
+          draftError.value =
+            'Не удалось сохранить черновик. Текст остаётся в форме. Повторите сохранение.';
+        }
         return false;
       } finally {
-        saving.value = false;
-        pending = null;
+        if (current === generation) saving.value = false;
       }
     })();
-    const result = await pending;
-    if (result && dirty.value) return flushDraft();
-    return result;
+    pending.set(operationKey, save);
+    const result = await save;
+    pending.delete(operationKey);
+    if (!result || current !== generation) return false;
+    return dirty.value ? flushDraft() : true;
   };
   watch(text, () => {
     if (!dirty.value) return;
@@ -97,7 +119,7 @@ export function useServerDraft(text: Ref<string>, kind: 'diary' | 'homework', ke
     () => {
       void reloadDraft();
     },
-    { immediate: true },
+    { immediate: true, flush: 'sync' },
   );
   const guard = async () => {
     if (!dirty.value && !saving.value) return true;

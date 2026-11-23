@@ -121,16 +121,13 @@
         <!-- Practice of the day -->
         <section class="card practice-card">
           <div class="practice-top">
-            <span class="medallion medallion-accent"
-              ><Icon :name="practice.icon" :size="22"
-            /></span>
-            <span class="chip badge-accent">Практика дня</span>
+            <span class="medallion medallion-accent"><Icon name="palette" :size="22" /></span>
           </div>
-          <h3 class="practice-title">{{ practice.title }}</h3>
-          <p class="practice-text muted">{{ practice.text }}</p>
-          <RouterLink :to="practice.to" class="btn-primary btn-block">{{
-            practice.cta
-          }}</RouterLink>
+          <h3 class="practice-title">Творческая пауза</h3>
+          <p class="practice-text muted">Выберите короткое упражнение для бумаги или холста.</p>
+          <RouterLink to="/practices" class="btn-primary btn-block"
+            >Начать творческую паузу</RouterLink
+          >
         </section>
 
         <!-- Recent diary -->
@@ -256,32 +253,6 @@ const actions = [
     accent: true,
   },
 ];
-
-const practices = [
-  {
-    icon: 'wind',
-    title: 'Дыхание «4-7-8»',
-    text: 'Несколько минут спокойного дыхания помогают снизить тревогу и вернуть ясность.',
-    to: '/breathing',
-    cta: 'Начать практику',
-  },
-  {
-    icon: 'edit',
-    title: 'Три строчки о дне',
-    text: 'Запишите три момента сегодняшнего дня. Небольшая рефлексия — большой шаг.',
-    to: '/diary',
-    cta: 'Открыть дневник',
-  },
-  {
-    icon: 'palette',
-    title: 'Свободный рисунок',
-    text: 'Нарисуйте своё состояние без правил и получите бережный отклик.',
-    to: '/image-analysis',
-    cta: 'Попробовать',
-  },
-];
-// Rotate by day of month — stable within a day, no Math.random.
-const practice = computed(() => practices[new Date().getDate() % practices.length]);
 
 function truncate(t: string, n = 90) {
   if (!t) return '';

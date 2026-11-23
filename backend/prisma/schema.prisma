@@ -44,11 +44,16 @@ model User {
   patients        User[]            @relation("TherapistPatients")
   therapist       User?             @relation("TherapistPatients", fields: [therapistId], references: [id], onDelete: SetNull)
 
-  drafts         Draft[]
-  passwordResets PasswordReset[]
-  galleryReports GalleryReport[]
-  hiddenImages   HiddenImage[]
-  moodCheckIns   MoodCheckIn[]
+  drafts                 Draft[]
+  passwordResets         PasswordReset[]
+  galleryReports         GalleryReport[]
+  hiddenImages           HiddenImage[]
+  moodCheckIns           MoodCheckIn[]
+  practiceWorks          PracticeWork[]
+  practiceWorkRemovals   PracticeWorkRemoval[]
+  practiceCompletions    PracticeCompletion[]
+  practiceShares         PracticeShare[]       @relation("PracticeShareOwner")
+  receivedPracticeShares PracticeShare[]       @relation("PracticeShareRecipient")
 
   @@index([organizationId])
   @@index([therapistId])
@@ -411,4 +416,83 @@ model ImageDeletion {
   nextAttemptAt DateTime @default(now())
 
   @@index([nextAttemptAt])
+}
+
+model PracticeWork {
+  id            String               @id @default(uuid())
+  userId        String
+  requestId     String
+  practiceId    String?
+  title         String
+  note          String
+  image         Bytes?
+  imageMimeType String?
+  createdAt     DateTime             @default(now())
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reflections   PracticeReflection[]
+  shareItems    PracticeShareItem[]
+
+  @@unique([id, userId])
+  @@unique([userId, requestId])
+  @@index([userId, createdAt, id])
+}
+
+model PracticeWorkRemoval {
+  userId    String
+  requestId String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, requestId])
+}
+
+model PracticeReflection {
+  id        String       @id @default(uuid())
+  workId    String
+  content   String
+  createdAt DateTime     @default(now())
+  work      PracticeWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+
+  @@index([workId, createdAt, id])
+}
+
+model PracticeCompletion {
+  userId      String
+  practiceId  String
+  completedAt DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, practiceId])
+}
+
+model PracticeShare {
+  id          String              @id @default(uuid())
+  ownerId     String
+  requestId   String
+  therapistId String
+  createdAt   DateTime            @default(now())
+  revokedAt   DateTime?
+  owner       User                @relation("PracticeShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  therapist   User                @relation("PracticeShareRecipient", fields: [therapistId], references: [id], onDelete: Cascade)
+  items       PracticeShareItem[]
+
+  @@unique([id, ownerId])
+  @@unique([ownerId, requestId])
+  @@index([ownerId, revokedAt, createdAt])
+  @@index([therapistId, revokedAt, createdAt, id])
+}
+
+model PracticeShareItem {
+  shareId       String
+  ownerId       String
+  workId        String
+  position      Int
+  title         String
+  note          String?
+  reflections   Json
+  includesImage Boolean
+  share         PracticeShare @relation(fields: [shareId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  work          PracticeWork  @relation(fields: [workId, ownerId], references: [id, userId], onDelete: Cascade)
+
+  @@id([shareId, workId])
+  @@index([workId, ownerId])
 }

@@ -114,14 +114,20 @@ export function useDiaryEntries() {
   };
   // --- End Editing State & Logic ---
 
-  const submitNewEntry = async () => {
-    if (isSavingEntry.value || newEntryText.value.trim() === '') return;
+  const submitNewEntry = async (userId: string) => {
+    if (isSavingEntry.value || newEntryText.value.trim() === '' || auth.user?.id !== userId) return;
     isSavingEntry.value = true;
     entryError.value = '';
-    const saved = await userProfileStore.addDiaryEntry(newEntryText.value.trim());
-    if (saved) newEntryText.value = '';
-    else entryError.value = 'Не удалось сохранить запись. Текст не потерян — попробуйте ещё раз.';
-    isSavingEntry.value = false;
+    try {
+      const text = newEntryText.value;
+      const saved = await userProfileStore.addDiaryEntry(text.trim(), userId);
+      if (auth.user?.id !== userId) return;
+      if (saved && newEntryText.value === text) newEntryText.value = '';
+      if (!saved)
+        entryError.value = 'Не удалось сохранить запись. Текст не потерян — попробуйте ещё раз.';
+    } finally {
+      isSavingEntry.value = false;
+    }
   };
 
   const sortedDiaryEntries = computed(() => {

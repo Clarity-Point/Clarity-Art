@@ -61,6 +61,9 @@
         <p class="auth-switch muted">
           Нет аккаунта? <router-link to="/register">Зарегистрироваться</router-link>
         </p>
+        <p class="auth-switch">
+          <RouterLink to="/practice-cards">Печатные карточки для практик</RouterLink>
+        </p>
       </div>
     </div>
   </main>

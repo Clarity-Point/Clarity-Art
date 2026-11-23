@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import prisma from '../config/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, sendAIConsentRequired } from '../middleware/auth';
 import { AIService, ChatMessage } from '../services/aiService';
 import { analyzeCrisisRisk } from '../services/crisisService';
 import { rewardPoints } from '../middleware/gamification';
@@ -9,6 +9,7 @@ import { validateImageInput, validateTextInput } from '../security/inputValidati
 import { createLogger } from '../config/logger';
 import { readStoredImage, removeStoredImage, storeImage } from '../services/imageStorageService';
 import { canUseConfiguredAI } from '../services/aiConsentService';
+import { AI_CHAT_TIMEOUT_MS } from '../config/ai';
 
 const log = createLogger('aiController');
 
@@ -47,13 +48,6 @@ export const chat = async (req: AuthRequest, res: Response) => {
   const safeMessage = messageValidation.value;
 
   try {
-    // Defence in depth: the route already requires consent, but the provider
-    // calls below must never be reachable without it re-verified here.
-    const allowProvider = await canUseConfiguredAI(req.user.id);
-    const { content: reply, usage } = await AIService.generateText(safeMessage);
-    const riskLevel = await analyzeCrisisRisk(safeMessage, allowProvider);
-
-    // Get or create session. Only allow access to sessions owned by the user.
     let session;
     if (sessionId) {
       session = await prisma.chatSession.findFirst({
@@ -61,6 +55,12 @@ export const chat = async (req: AuthRequest, res: Response) => {
       });
       if (!session) return res.status(404).json({ error: 'Session not found' });
     }
+
+    if (!(await canUseConfiguredAI(req.user.id))) return sendAIConsentRequired(res);
+    const [{ content: reply, usage }, riskLevel] = await Promise.all([
+      AIService.generateText(safeMessage),
+      analyzeCrisisRisk(safeMessage, true),
+    ]);
 
     if (!session) {
       session = await prisma.chatSession.create({
@@ -99,6 +99,9 @@ export const chat = async (req: AuthRequest, res: Response) => {
 
     // Award 5 points for each chat message
     await rewardPoints(req.user.id, 5);
+    await AnalyticsService.updateAttentionScore(req.user.id).catch((err) => {
+      log.error({ err }, 'Chat attention update failed');
+    });
 
     res.json({ reply, riskLevel, sessionId: session.id });
   } catch (error: unknown) {
@@ -121,11 +124,6 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
   res.once('close', () => abort.abort());
 
   try {
-    const allowProvider = await canUseConfiguredAI(req.user.id);
-    const riskLevel = await analyzeCrisisRisk(safeMessage, allowProvider);
-    const tags = await AIService.extractTags(safeMessage, allowProvider);
-    await AnalyticsService.logSentiment(req.user.id, riskLevel, tags, safeMessage);
-
     // Get previous messages for context
     let history: ChatMessage[] = [];
     let activeSessionId = sessionId;
@@ -148,6 +146,16 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       }));
     }
 
+    if (abort.signal.aborted) return res.end();
+    if (!(await canUseConfiguredAI(req.user.id))) return sendAIConsentRequired(res);
+    if (abort.signal.aborted) return res.end();
+
+    const [riskLevel, tags] = await Promise.all([
+      analyzeCrisisRisk(safeMessage, true),
+      AIService.extractTags(safeMessage, true),
+    ]);
+    // Consent may have changed while enrichment was in flight.
+    if (!(await canUseConfiguredAI(req.user.id))) return sendAIConsentRequired(res);
     const messages = [...history, { role: 'user', content: safeMessage }];
 
     // Create or update session before stream starts
@@ -172,67 +180,97 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
     await prisma.chatMessage.create({
       data: { sessionId: activeSessionId, role: 'user', content: safeMessage },
     });
+    if (abort.signal.aborted) return res.end();
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Connection', 'keep-alive');
+    const metadata = `data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`;
+    res.write(metadata);
 
-    const stream = await AIService.generateTextStream(messages, req.user.id, abort.signal);
+    const analytics = await Promise.allSettled([
+      AnalyticsService.logSentiment(req.user.id, riskLevel, tags),
+      AnalyticsService.updateAttentionScore(req.user.id),
+    ]);
+    for (const result of analytics) {
+      if (result.status === 'rejected') log.error({ err: result.reason }, 'Chat analytics failed');
+    }
+
+    if (abort.signal.aborted) return res.end();
+    if (!(await canUseConfiguredAI(req.user.id))) {
+      return res.end(
+        `data: ${JSON.stringify({ error: 'AI consent required', code: 'AI_CONSENT_REQUIRED' })}\n\n`,
+      );
+    }
+    const stream = await AIService.generateTextStream(messages, abort.signal);
     if (abort.signal.aborted) {
       await stream.cancel().catch(() => undefined);
       return res.end();
     }
 
-    // Set headers for SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Connection', 'keep-alive');
-    res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
-
     let fullReply = '';
+    let doneEvent = false;
+    let finishedChoice = false;
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let upstreamBuffer = '';
 
-    /*
-     * The client going away is the normal case, not an exception: the user
-     * closes the tab, switches view or loses connectivity mid-answer. Without
-     * this the read loop keeps pulling (and paying for) a reply nobody reads,
-     * the upstream socket stays pinned, and each abandoned tab leaks a
-     * connection until the process runs out of them.
-     */
-    const releaseUpstream = () => {
-      void reader.cancel().catch(() => undefined);
-    };
+    const releaseUpstream = () => void reader.cancel().catch(() => undefined);
     abort.signal.addEventListener('abort', releaseUpstream, { once: true });
     if (abort.signal.aborted) releaseUpstream();
 
     const forwardEvent = (event: string) => {
-      for (const line of event.split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        const dataStr = line.slice(6);
+      for (const line of event.split(/\r?\n/)) {
+        if (!line.startsWith('data:')) continue;
+        const dataStr = line.slice(5).trimStart();
         if (dataStr === '[DONE]') {
-          res.write('data: [DONE]\n\n');
+          doneEvent = true;
+          return;
+        }
+        let data: {
+          error?: unknown;
+          choices?: { delta?: { content?: unknown }; finish_reason?: string | null }[];
+        };
+        try {
+          data = JSON.parse(dataStr);
+        } catch {
           continue;
         }
-        try {
-          const data = JSON.parse(dataStr);
-          const content = data.choices?.[0]?.delta?.content || '';
+        const choice = data?.choices?.[0];
+        if (data?.error || choice?.finish_reason === 'error') {
+          throw new Error('AI provider reported a stream error');
+        }
+        if (choice?.finish_reason) finishedChoice = true;
+        const content = choice?.delta?.content;
+        if (typeof content === 'string' && content) {
           fullReply += content;
-          if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        } catch {
-          // Ignore malformed complete events from an upstream provider.
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
         }
       }
     };
 
-    while (true) {
-      if (abort.signal.aborted) break;
-      const { done, value } = await reader.read();
-      if (done) break;
-      upstreamBuffer += decoder.decode(value, { stream: true });
-      const events = upstreamBuffer.split('\n\n');
-      upstreamBuffer = events.pop() || '';
-      events.forEach(forwardEvent);
+    try {
+      while (!abort.signal.aborted && !doneEvent) {
+        let timedOut = false;
+        const idleTimer = setTimeout(() => {
+          timedOut = true;
+          releaseUpstream();
+        }, AI_CHAT_TIMEOUT_MS);
+        const { done, value } = await reader.read().finally(() => clearTimeout(idleTimer));
+        if (timedOut) throw new Error('AI stream became idle');
+        if (done || abort.signal.aborted) break;
+        upstreamBuffer += decoder.decode(value, { stream: true });
+        const events = upstreamBuffer.split(/\r?\n\r?\n/);
+        upstreamBuffer = events.pop() || '';
+        for (const event of events) {
+          forwardEvent(event);
+          if (doneEvent) break;
+        }
+      }
+      if (!doneEvent && !abort.signal.aborted) forwardEvent(upstreamBuffer + decoder.decode());
+    } finally {
+      abort.signal.removeEventListener('abort', releaseUpstream);
+      releaseUpstream();
     }
-    upstreamBuffer += decoder.decode();
-    if (upstreamBuffer.trim() && !abort.signal.aborted) forwardEvent(upstreamBuffer);
 
     // After stream ends, save assistant reply to DB. An aborted stream is not an
     // error the user needs to see, and the truncated text is not worth storing
@@ -241,6 +279,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       log.info('Chat stream aborted by the client before completion');
       return res.end();
     }
+    if (!doneEvent && !finishedChoice) throw new Error('AI stream ended before completion');
 
     if (fullReply) {
       await prisma.chatMessage.create({
@@ -249,7 +288,7 @@ export const chatStream = async (req: AuthRequest, res: Response) => {
       await rewardPoints(req.user.id, 5);
     }
 
-    res.write(`data: ${JSON.stringify({ sessionId: activeSessionId, riskLevel })}\n\n`);
+    res.write('data: [DONE]\n\n');
     res.end();
   } catch (error: unknown) {
     log.error({ err: error }, 'Chat stream error');
@@ -332,6 +371,7 @@ export const analyzeImage = async (req: AuthRequest, res: Response) => {
     // an external provider even if this route is ever mounted without the
     // requireAIConsent middleware.
     const allowProvider = await canUseConfiguredAI(req.user.id);
+    if (!allowProvider) return sendAIConsentRequired(res);
     const { content: reply, usage } = await AIService.analyzeImage(
       safePrompt,
       mimeType,
@@ -411,7 +451,6 @@ export const getStoredImage = async (req: AuthRequest, res: Response) => {
       select: { imageStorageKey: true, imageMimeType: true, imageUrl: true },
     });
     if (!image) return res.status(404).json({ error: 'Image not found' });
-    res.setHeader('Cache-Control', image.imageStorageKey ? 'private, max-age=3600' : 'no-store');
     if (image.imageStorageKey) {
       res.type(image.imageMimeType || 'application/octet-stream');
       return res.send(await readStoredImage(image.imageStorageKey));

@@ -29,8 +29,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   function applyProfile(profile: Record<string, unknown>) {
     if (typeof profile?.id !== 'string' || !profile.id) throw new Error('Invalid session profile');
+    if (user.value?.id && user.value.id !== profile.id) expireSession();
     user.value = {
-      id: typeof profile.id === 'string' ? profile.id : undefined,
+      id: profile.id,
       email: typeof profile.email === 'string' ? profile.email : undefined,
       name: typeof profile.name === 'string' ? profile.name : undefined,
       role: typeof profile.role === 'string' ? profile.role : undefined,

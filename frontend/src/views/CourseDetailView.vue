@@ -287,7 +287,10 @@ const toggleLesson = async (lessonId: string) => {
   if (!course.value || progressSaving.value) return;
 
   const progressEntry = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
-  let completedLessons = progressEntry ? [...(progressEntry.completedLessons || [])] : [];
+  const availableLessons = new Set(lessons.value.map((lesson) => lesson.id));
+  const completedLessons = (progressEntry?.completedLessons ?? []).filter((id) =>
+    availableLessons.has(id),
+  );
 
   const index = completedLessons.indexOf(lessonId);
   if (index > -1) {
@@ -307,33 +310,13 @@ const toggleLesson = async (lessonId: string) => {
 const updateProgress = async (completedLessons: string[]) => {
   if (!course.value) return false;
 
-  // `modules` is optional on the API response shape and `lessons` on a module
-  // can be absent for a course mid-authoring. Reading them unguarded throws
-  // inside the click handler and the view is left with a half-applied toggle.
-  const totalLessons = (course.value.modules ?? []).reduce(
-    (acc, mod) => acc + (mod.lessons?.length ?? 0),
-    0,
-  );
-  const totalHomeworks = course.value.relatedHomework?.length || 0;
-
-  const submittedHwCount =
-    course.value.relatedHomework?.filter((hw) =>
-      profile.value.homeworkHistory.some((sub) => sub.homeworkId === hw.id),
-    ).length || 0;
-
-  const totalItems = totalLessons + totalHomeworks;
-  const completedItems = completedLessons.length + submittedHwCount;
-
-  const newProgress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-
   progressError.value = '';
   const saved = await userProfileStore.updateCourseProgress({
     courseId: course.value?.id,
     courseName: course.value.title,
-    progress: newProgress,
+    progress: currentCourseProgress.value,
     completedLessons,
     lastAccessed: new Date().toISOString(),
-    completedDate: newProgress === 100 ? new Date().toISOString() : undefined,
   });
   if (!saved) progressError.value = 'Не удалось сохранить прогресс. Попробуйте ещё раз.';
   return saved;
@@ -375,16 +358,6 @@ const progressHint = computed(() => {
   if (pct < 100) return 'Двигайтесь в своём темпе, это не гонка.';
   return 'Курс пройден полностью. Заметили ли вы перемены в себе?';
 });
-
-watch(
-  () => profile.value.homeworkHistory,
-  () => {
-    if (!course.value) return;
-    const progress = profile.value.courseProgress.find((cp) => cp.courseId === course.value?.id);
-    updateProgress(progress?.completedLessons || []);
-  },
-  { deep: true },
-);
 </script>
 
 <style scoped>

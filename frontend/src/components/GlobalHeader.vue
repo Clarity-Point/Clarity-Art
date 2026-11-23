@@ -81,10 +81,12 @@
             class="user-trigger"
             :aria-expanded="showUser"
             aria-controls="user-panel"
-            aria-label="Меню профиля"
           >
-            <span class="avatar">{{ initials }}</span>
-            <span class="user-name">{{ profile.name || 'Профиль' }}</span>
+            <span class="sr-only">Меню профиля</span>
+            <span class="avatar" aria-hidden="true">{{ initials }}</span>
+            <span class="user-name" :aria-hidden="!profile.name">{{
+              profile.name || 'Профиль'
+            }}</span>
             <Icon name="chevron-down" :size="16" class="faint" />
           </button>
           <transition name="pop">

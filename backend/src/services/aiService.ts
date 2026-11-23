@@ -1,5 +1,4 @@
 import axios from 'axios';
-import prisma from '../config/prisma';
 import {
   AI_BASE_URL,
   AI_MODEL,
@@ -71,11 +70,6 @@ function normalizeTags(raw: unknown): string[] {
 }
 
 export class AIService {
-  /** Whether real model calls are available (an OpenRouter key is configured). */
-  static get isConfigured(): boolean {
-    return AI_ENABLED;
-  }
-
   static async generateText(prompt: string): Promise<{ content: string; usage: AIUsage | null }> {
     if (!AI_ENABLED) {
       return { content: FALLBACK_REPLY, usage: null };
@@ -174,24 +168,6 @@ ${text.slice(0, 2_000)}
     return found.size ? [...found] : ['Общее'];
   }
 
-  static async getContextualPrompt(userId: string): Promise<string> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { profile: true },
-    });
-
-    if (!user || !user.profile) return '';
-
-    const { sleepHours, stepsCount } = user.profile;
-
-    let context = `Контекст пользователя: сегодня спал ${sleepHours || '?'}ч, прошел ${stepsCount || '?'} шагов. `;
-    if (sleepHours && sleepHours < 6)
-      context += 'Пользователь может быть раздражительным из-за недосыпа. ';
-    if (stepsCount && stepsCount < 3000) context += 'Мало физической активности сегодня. ';
-
-    return context;
-  }
-
   /**
    * Opens a streaming completion.
    *
@@ -200,13 +176,12 @@ ${text.slice(0, 2_000)}
    * provider keeps generating (and billing) tokens for a reply nobody will ever
    * read, and the upstream socket stays pinned until the model finishes.
    *
-   * The timeout only covers establishing the stream (headers + first byte).
+   * The timeout only covers receiving the upstream response headers.
    * Once the body starts flowing the caller's own abort governs the lifetime,
    * because a long generation must not be cut off by the connect budget.
    */
   static async generateTextStream(
     messages: ChatMessage[],
-    _userId?: string,
     signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
     if (!AI_ENABLED) {
@@ -227,11 +202,9 @@ ${text.slice(0, 2_000)}
     }
     // Bound the connect phase independently of the caller's abort, so a hung
     // provider still fails fast even if the client is still connected.
-    const connectTimeout = AbortSignal.timeout(AI_CHAT_TIMEOUT_MS);
-    const composite = signal
-      ? AbortSignal.any([signal, connectTimeout])
-      : /* istanbul ignore next -- exercised whenever a caller passes no signal */
-        connectTimeout;
+    const connect = new AbortController();
+    const timer = setTimeout(() => connect.abort(), AI_CHAT_TIMEOUT_MS);
+    const composite = signal ? AbortSignal.any([signal, connect.signal]) : connect.signal;
     try {
       const response = await fetch(`${AI_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -252,23 +225,12 @@ ${text.slice(0, 2_000)}
         throw new Error('OpenRouter streaming error: empty response body');
       }
 
-      // The stream is established; from here the caller's signal is the only
-      // authority on when to stop, so the connect budget must not kill it.
-      if (signal) {
-        return response.body.pipeThrough(
-          new TransformStream({
-            transform(chunk, controller) {
-              if (signal.aborted) throw new Error('Client disconnected');
-              controller.enqueue(chunk);
-            },
-          }),
-        );
-      }
-
       return response.body;
     } catch (error: unknown) {
       log.error({ err: error }, 'AIService generateTextStream error');
       throw new Error('Failed to start AI stream');
+    } finally {
+      clearTimeout(timer);
     }
   }
 

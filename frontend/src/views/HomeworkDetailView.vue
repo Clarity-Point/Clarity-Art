@@ -99,16 +99,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import axios from 'axios';
 import { useUserProfileStore, type HomeworkEntry } from '@/stores/userProfileStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useServerDraft } from '@/composables/useServerDraft';
 import DraftStatus from '@/components/DraftStatus.vue';
 import Icon from '@/components/Icon.vue';
 const route = useRoute(),
   router = useRouter(),
-  userProfileStore = useUserProfileStore();
+  userProfileStore = useUserProfileStore(),
+  auth = useAuthStore();
 const homeworkId = computed(() => String(route.params.homeworkId || ''));
 const homeworkTitle = ref('Детали задания'),
   homeworkDescription = ref(''),
@@ -133,16 +135,25 @@ async function reloadSaved() {
   await reloadDraft();
 }
 let request = 0;
+onBeforeUnmount(() => request++);
 watch(
-  homeworkId,
-  async (id) => {
+  [homeworkId, () => auth.user?.id],
+  async ([id, userId]) => {
     const current = ++request;
     metadataReady.value = false;
     loadedSubmission.value = null;
+    isSubmitting.value = false;
     submissionMessage.value = '';
     homeworkTitle.value = 'Загрузка задания…';
+    homeworkDescription.value = '';
+    courseContextId.value = '';
+    courseTitle.value = '';
+    if (!userId) return;
     try {
-      const { data } = await axios.get(`${import.meta.env.VITE_API_URL || '/api'}/homework/${id}`);
+      const { data } = await axios.get(
+        `${import.meta.env.VITE_API_URL || '/api'}/homework/${encodeURIComponent(id)}`,
+        { headers: { 'X-Expected-User-Id': userId } },
+      );
       if (current !== request) return;
       homeworkTitle.value = data.title;
       homeworkDescription.value = data.description;
@@ -159,7 +170,7 @@ watch(
       }
     }
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
 );
 const currentSubmission = computed(
   () =>
@@ -172,29 +183,34 @@ const formattedSubmissionDate = computed(() =>
     : '',
 );
 async function submitHomework() {
-  if (isSubmitting.value || !metadataReady.value || !submissionContent.value.trim()) return;
+  const userId = auth.user?.id;
+  if (!userId || isSubmitting.value || !metadataReady.value || !submissionContent.value.trim())
+    return;
+  const current = request;
+  const id = homeworkId.value;
   isSubmitting.value = true;
   submissionMessage.value = '';
   try {
-    if (!(await flushDraft())) return;
-    const saved = await userProfileStore.addHomeworkSubmission({
-      homeworkId: homeworkId.value,
-      homeworkTitle: homeworkTitle.value,
-      submittedContent: submissionContent.value,
-    });
+    if (!(await flushDraft()) || current !== request) return;
+    const text = submissionContent.value;
+    const saved = await userProfileStore.addHomeworkSubmission(
+      { homeworkId: id, homeworkTitle: homeworkTitle.value, submittedContent: text },
+      userId,
+    );
+    if (current !== request) return;
     if (!saved) {
       submissionMessage.value = 'Не удалось сдать задание. Ваш текст сохранён в черновике.';
       return;
     }
     submissionMessage.value = 'Задание успешно сдано!';
     loadedSubmission.value =
-      userProfileStore.profile.homeworkHistory.find(
-        (item) => item.homeworkId === homeworkId.value,
-      ) || null;
-    submissionContent.value = '';
-    await flushDraft();
+      userProfileStore.profile.homeworkHistory.find((item) => item.homeworkId === id) || null;
+    if (submissionContent.value === text) {
+      submissionContent.value = '';
+      await flushDraft();
+    }
   } finally {
-    isSubmitting.value = false;
+    if (current === request) isSubmitting.value = false;
   }
 }
 const goBack = () => {

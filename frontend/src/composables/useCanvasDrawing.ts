@@ -8,11 +8,17 @@ type DrawTool = 'pen' | 'eraser';
  * detection and surface clearing. Pure drawing concerns only — analysis state
  * reset stays with the caller. Extracted verbatim to preserve behaviour.
  */
-export function useCanvasDrawing() {
+export function useCanvasDrawing({
+  tapToFullscreen = true,
+  onChange,
+}: {
+  tapToFullscreen?: boolean;
+  onChange?: () => void;
+} = {}) {
   const drawingCanvasRef = ref<HTMLCanvasElement | null>(null);
   const canvasCtx = ref<CanvasRenderingContext2D | null>(null);
   const isDrawing = ref(false);
-  const currentColor = ref('black');
+  const currentColor = ref('#000000');
   const currentTool = ref<DrawTool>('pen');
   const lineWidth = ref(5);
   const isCanvasEmpty = ref(true);
@@ -23,6 +29,7 @@ export function useCanvasDrawing() {
   const MAX_CLICK_DURATION = 250;
   const MAX_CLICK_MOVEMENT = 8;
   let potentialClick = false;
+  let strokeChanged = false;
 
   const toggleCanvasFullscreen = () => {
     isCanvasFullscreen.value = !isCanvasFullscreen.value;
@@ -63,106 +70,72 @@ export function useCanvasDrawing() {
     };
   };
 
-  const handleMouseDown = (event: MouseEvent) => {
+  const applyStrokeStyle = (context: CanvasRenderingContext2D) => {
+    const erasing = currentTool.value === 'eraser';
+    context.strokeStyle = erasing ? '#ffffff' : currentColor.value;
+    context.lineWidth = Number(lineWidth.value) * (erasing ? 2 : 1);
+  };
+
+  const startStroke = (event: MouseEvent | TouchEvent) => {
     if (!canvasCtx.value) return;
     const pos = getMousePos(event);
     mouseDownTime.value = Date.now();
     mouseDownPos.value = pos;
-    potentialClick = true;
+    potentialClick = tapToFullscreen;
+    strokeChanged = false;
     isDrawing.value = true;
     canvasCtx.value.beginPath();
     canvasCtx.value.moveTo(pos.x, pos.y);
   };
 
-  const handleMouseMove = (event: MouseEvent) => {
-    if (!isDrawing.value || !canvasCtx.value) return;
+  const moveStroke = (event: MouseEvent | TouchEvent) => {
+    const context = canvasCtx.value;
+    if (!isDrawing.value || !context) return;
     const pos = getMousePos(event);
     if (potentialClick) {
       const dx = Math.abs(pos.x - mouseDownPos.value.x);
       const dy = Math.abs(pos.y - mouseDownPos.value.y);
-      if (dx > MAX_CLICK_MOVEMENT || dy > MAX_CLICK_MOVEMENT) {
-        potentialClick = false;
-      }
-    }
-    if (isDrawing.value && !potentialClick) {
-      if (currentTool.value === 'pen') {
-        canvasCtx.value.strokeStyle = currentColor.value;
-        canvasCtx.value.lineWidth = Number(lineWidth.value);
-      } else if (currentTool.value === 'eraser') {
-        canvasCtx.value.strokeStyle = 'white';
-        canvasCtx.value.lineWidth = Number(lineWidth.value) * 2;
-      }
-      canvasCtx.value.lineTo(pos.x, pos.y);
-      canvasCtx.value.stroke();
-    }
-  };
-
-  const handleMouseUpOrTouchEnd = () => {
-    const duration = Date.now() - mouseDownTime.value;
-    if (potentialClick && duration < MAX_CLICK_DURATION) {
-      toggleCanvasFullscreen();
-      isDrawing.value = false;
+      if (dx <= MAX_CLICK_MOVEMENT && dy <= MAX_CLICK_MOVEMENT) return;
       potentialClick = false;
-      return;
     }
-    if (isDrawing.value && canvasCtx.value) {
-      canvasCtx.value.closePath();
-    }
+    applyStrokeStyle(context);
+    context.lineTo(pos.x, pos.y);
+    context.stroke();
+    strokeChanged = true;
+  };
+
+  const closeStroke = () => {
+    if (!isDrawing.value) return;
+    canvasCtx.value?.closePath();
     isDrawing.value = false;
+    potentialClick = false;
     checkIfCanvasIsEmpty();
-    potentialClick = false;
+    if (strokeChanged) onChange?.();
   };
 
-  const handleMouseUp = () => {
-    handleMouseUpOrTouchEnd();
-  };
-  const handleMouseLeave = () => {
-    if (isDrawing.value) {
-      if (canvasCtx.value) canvasCtx.value.closePath();
-      isDrawing.value = false;
-      checkIfCanvasIsEmpty();
+  const endStroke = () => {
+    const context = canvasCtx.value;
+    if (!isDrawing.value || !context) return;
+    if (potentialClick && Date.now() - mouseDownTime.value < MAX_CLICK_DURATION) {
+      toggleCanvasFullscreen();
+    } else if (!tapToFullscreen && !strokeChanged) {
+      applyStrokeStyle(context);
+      context.fillStyle = context.strokeStyle;
+      context.beginPath();
+      context.arc(
+        mouseDownPos.value.x,
+        mouseDownPos.value.y,
+        context.lineWidth / 2,
+        0,
+        Math.PI * 2,
+      );
+      context.fill();
+      strokeChanged = true;
     }
-    potentialClick = false;
+    closeStroke();
   };
 
-  const handleTouchStart = (event: TouchEvent) => {
-    if (!canvasCtx.value) return;
-    const pos = getMousePos(event);
-    mouseDownTime.value = Date.now();
-    mouseDownPos.value = pos;
-    potentialClick = true;
-    isDrawing.value = true;
-    canvasCtx.value.beginPath();
-    canvasCtx.value.moveTo(pos.x, pos.y);
-  };
-
-  const handleTouchMove = (event: TouchEvent) => {
-    if (!isDrawing.value || !canvasCtx.value) return;
-    const pos = getMousePos(event);
-    if (potentialClick) {
-      const dx = Math.abs(pos.x - mouseDownPos.value.x);
-      const dy = Math.abs(pos.y - mouseDownPos.value.y);
-      if (dx > MAX_CLICK_MOVEMENT || dy > MAX_CLICK_MOVEMENT) {
-        potentialClick = false;
-      }
-    }
-    if (isDrawing.value && !potentialClick) {
-      if (currentTool.value === 'pen') {
-        canvasCtx.value.strokeStyle = currentColor.value;
-        canvasCtx.value.lineWidth = Number(lineWidth.value);
-      } else if (currentTool.value === 'eraser') {
-        canvasCtx.value.strokeStyle = 'white';
-        canvasCtx.value.lineWidth = Number(lineWidth.value) * 2;
-      }
-      canvasCtx.value.lineTo(pos.x, pos.y);
-      canvasCtx.value.stroke();
-    }
-  };
-  const handleTouchEnd = () => {
-    handleMouseUpOrTouchEnd();
-  };
-
-  const setTool = (tool: DrawTool, color: string = 'black') => {
+  const setTool = (tool: DrawTool, color: string = currentColor.value) => {
     currentTool.value = tool;
     if (tool === 'pen') {
       currentColor.value = color;
@@ -192,9 +165,11 @@ export function useCanvasDrawing() {
   // gate their own analysis-state resets on the same condition.
   const clearCanvasSurface = (): boolean => {
     if (canvasCtx.value && drawingCanvasRef.value) {
+      const hadDrawing = !isCanvasEmpty.value;
       canvasCtx.value.fillStyle = 'white';
       canvasCtx.value.fillRect(0, 0, drawingCanvasRef.value.width, drawingCanvasRef.value.height);
       checkIfCanvasIsEmpty();
+      if (hadDrawing) onChange?.();
       return true;
     }
     return false;
@@ -227,13 +202,13 @@ export function useCanvasDrawing() {
     isCanvasEmpty,
     isCanvasFullscreen,
     toggleCanvasFullscreen,
-    handleMouseDown,
-    handleMouseMove,
-    handleMouseUp,
-    handleMouseLeave,
-    handleTouchStart,
-    handleTouchMove,
-    handleTouchEnd,
+    handleMouseDown: startStroke,
+    handleMouseMove: moveStroke,
+    handleMouseUp: endStroke,
+    handleMouseLeave: closeStroke,
+    handleTouchStart: startStroke,
+    handleTouchMove: moveStroke,
+    handleTouchEnd: endStroke,
     setTool,
     clearCanvasSurface,
   };

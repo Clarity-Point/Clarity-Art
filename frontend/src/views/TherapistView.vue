@@ -5,6 +5,13 @@
       <p class="page-subtitle">
         Наблюдайте за состоянием подопечных и открывайте детальный анализ по каждому.
       </p>
+      <RouterLink
+        v-if="auth.user?.role === 'THERAPIST'"
+        class="btn-outline"
+        to="/therapist/practice-shares"
+      >
+        Подборки к встрече
+      </RouterLink>
     </header>
 
     <section class="stats-row">
@@ -160,11 +167,13 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/authStore';
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import { useFocusScope } from '@/composables/useFocusScope';
 import Icon from '@/components/Icon.vue';
 
+const auth = useAuthStore();
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 interface DiaryEntry {

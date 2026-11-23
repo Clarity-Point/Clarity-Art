@@ -66,6 +66,28 @@ const router = createRouter({
       meta: { requiresAuth: true, roles: ['THERAPIST', 'ADMIN'], title: 'Кабинет терапевта' },
     },
     {
+      path: '/therapist/practice-shares',
+      component: () => import('../views/ReceivedPracticeSharesView.vue'),
+      meta: { roles: ['THERAPIST'], title: 'Подборки к встрече' },
+    },
+    {
+      path: '/practices/:practiceId?',
+      name: 'practices',
+      component: () => import('../views/PracticesView.vue'),
+      meta: { title: 'Творческая пауза' },
+    },
+    {
+      path: '/practice-album',
+      component: () => import('../views/PracticeAlbumView.vue'),
+      meta: { title: 'Мой альбом' },
+    },
+    {
+      path: '/practice-cards/:practiceId?',
+      name: 'practice-cards',
+      component: () => import('../views/PracticeCardsView.vue'),
+      meta: { public: true, title: 'Карточки для печати' },
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('../views/AdminView.vue'),

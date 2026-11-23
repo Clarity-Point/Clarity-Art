@@ -33,7 +33,7 @@ const flag = (name, fallback) => {
 
 const RANK = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const threshold = (level) => {
-  if (!(level in RANK)) throw new Error(`Unknown audit severity: ${level}`);
+  if (!Object.hasOwn(RANK, level)) throw new Error(`Unknown audit severity: ${level}`);
   return RANK[level];
 };
 
@@ -81,7 +81,7 @@ for (const entry of allow) {
 const allowed = new Set(allow.map((entry) => entry.module));
 
 const productionReport = audit(['--omit=dev']);
-const everythingReport = audit([]);
+const everythingReport = audit(['--include=dev']);
 
 const production = collect(productionReport, prodThreshold);
 const everything = collect(everythingReport, devThreshold);

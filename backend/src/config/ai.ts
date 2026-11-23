@@ -1,3 +1,5 @@
+import { createLogger } from './logger';
+
 // Provider-agnostic AI configuration.
 //
 // The chat, image-analysis, tagging and crisis-detection features all speak the
@@ -26,7 +28,8 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
   return Math.min(Math.max(Math.trunc(parsed), min), max);
 }
 
-export const AI_BASE_URL = process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1';
+const configuredBaseURL = process.env.AI_BASE_URL?.trim();
+export const AI_BASE_URL = configuredBaseURL || 'https://openrouter.ai/api/v1';
 
 export const AI_MODEL = process.env.AI_MODEL || 'openai/gpt-4o-mini';
 
@@ -34,14 +37,30 @@ export const AI_VISION_MODEL = process.env.AI_VISION_MODEL || AI_MODEL;
 
 export const AI_API_KEY = (process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY || '').trim();
 
+function getConfiguredHost(baseURL: string): string | undefined {
+  try {
+    const url = new URL(baseURL);
+    if (url.protocol === 'http:' || url.protocol === 'https:')
+      return url.hostname.replace(/\.$/, '');
+  } catch {
+    // Report configuration errors without logging the supplied URL.
+  }
+  createLogger('aiConfig').warn('AI disabled: AI_BASE_URL must be an HTTP(S) URL');
+}
+
+const configuredHost = configuredBaseURL ? getConfiguredHost(configuredBaseURL) : undefined;
+const pointsToOpenRouter =
+  configuredHost === 'openrouter.ai' || configuredHost?.endsWith('.openrouter.ai');
 export const AI_DATA_PROCESSING_MODE =
-  process.env.AI_DATA_PROCESSING_MODE === 'local' ? 'local' : 'external';
+  process.env.AI_DATA_PROCESSING_MODE === 'local' && configuredHost && !pointsToOpenRouter
+    ? 'local'
+    : 'external';
 
 // AI is "enabled" when there is somewhere to send requests: either a key is set
 // (hosted providers) or a custom base URL is configured (a local server that
 // needs no key). Otherwise the app runs in a graceful, canned-fallback mode so
 // it stays fully usable offline with zero configuration.
-export const AI_ENABLED = !!(AI_API_KEY || process.env.AI_BASE_URL);
+export const AI_ENABLED = Boolean(configuredBaseURL ? configuredHost : AI_API_KEY);
 
 // External providers may receive diary, chat, profile and image content only
 // after the user has explicitly opted in. Local/offline inference needs no such

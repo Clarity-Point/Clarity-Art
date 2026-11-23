@@ -249,6 +249,7 @@ export const useUserProfileStore = defineStore('userProfile', () => {
 
   async function addHomeworkSubmission(
     submission: Omit<HomeworkEntry, 'submissionDate'>,
+    expectedUserId?: string,
   ): Promise<boolean> {
     const revision = profileRevision;
     const newSubmission: HomeworkEntry = {
@@ -257,7 +258,11 @@ export const useUserProfileStore = defineStore('userProfile', () => {
     };
 
     try {
-      const response = await axios.post(`${API_URL}/homework`, submission);
+      const response = await axios.post(
+        `${API_URL}/homework`,
+        submission,
+        expectedUserId ? { headers: { 'X-Expected-User-Id': expectedUserId } } : undefined,
+      );
       if (revision !== profileRevision) return false;
       newSubmission.submissionDate =
         response.data.submission?.submissionDate || newSubmission.submissionDate;
@@ -283,10 +288,14 @@ export const useUserProfileStore = defineStore('userProfile', () => {
     return true;
   }
 
-  async function addDiaryEntry(entryText: string): Promise<boolean> {
+  async function addDiaryEntry(entryText: string, expectedUserId?: string): Promise<boolean> {
     const revision = profileRevision;
     try {
-      const response = await axios.post(`${API_URL}/diary`, { content: entryText });
+      const response = await axios.post(
+        `${API_URL}/diary`,
+        { content: entryText },
+        expectedUserId ? { headers: { 'X-Expected-User-Id': expectedUserId } } : undefined,
+      );
       if (revision !== profileRevision) return false;
       const newEntry: DiaryEntry = {
         id: response.data.id,

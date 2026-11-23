@@ -117,9 +117,16 @@ export function useProfileActions() {
   };
 
   const downloadAccountData = async () => {
+    const userId = authStore.user?.id;
+    const revision = authStore.sessionRevision;
+    if (!userId) return;
     isManagingAccount.value = true;
     try {
-      const response = await axios.get(`${API_URL}/account/export`, { responseType: 'blob' });
+      const response = await axios.get(`${API_URL}/account/export`, {
+        responseType: 'blob',
+        headers: { 'X-Expected-User-Id': userId },
+      });
+      if (revision !== authStore.sessionRevision) return;
       const url = URL.createObjectURL(response.data);
       const link = document.createElement('a');
       link.href = url;

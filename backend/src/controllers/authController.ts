@@ -2,7 +2,7 @@ import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, sendAIConsentRequired } from '../middleware/auth';
 import {
   registerSchema,
   loginSchema,
@@ -16,6 +16,7 @@ import { createLogger } from '../config/logger';
 import { recordAudit } from '../services/auditService';
 import { AI_DATA_PROCESSING_MODE, AI_ENABLED, AI_REQUIRES_CONSENT } from '../config/ai';
 import { processImageDeletions } from '../services/imageDeletionService';
+import { canUseConfiguredAI } from '../services/aiConsentService';
 
 const log = createLogger('authController');
 
@@ -329,6 +330,7 @@ export const generateProfileAnalysis = async (req: AuthRequest, res: Response) =
 Последние записи дневника:
 ${recentDiary}`;
 
+    if (!(await canUseConfiguredAI(req.user.id))) return sendAIConsentRequired(res);
     const { content } = await AIService.generateText(prompt);
     res.json({ analysis: content });
   } catch (error) {
@@ -505,6 +507,26 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
       notifications: true,
       drafts: true,
       moodCheckIns: true,
+      practiceWorks: { include: { reflections: true } },
+      practiceCompletions: { select: { practiceId: true, completedAt: true } },
+      practiceShares: {
+        where: { revokedAt: null },
+        select: {
+          id: true,
+          therapistId: true,
+          createdAt: true,
+          items: {
+            orderBy: { position: 'asc' },
+            select: {
+              workId: true,
+              title: true,
+              note: true,
+              reflections: true,
+              includesImage: true,
+            },
+          },
+        },
+      },
       galleryReports: {
         select: {
           imageId: true,
@@ -521,7 +543,7 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
     },
   });
   if (!user) return res.status(404).json({ error: 'Account not found' });
-  const { password: _password, sessionVersion: _sessionVersion, ...safeData } = user;
+  const { password: _password, sessionVersion: _sessionVersion, practiceWorks, ...safeData } = user;
   recordAudit({
     action: 'account.exported',
     actorId: req.user.id,
@@ -535,5 +557,16 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
     },
   });
   res.setHeader('Content-Disposition', 'attachment; filename="clarity-account-data.json"');
-  res.json({ exportedAt: new Date().toISOString(), user: safeData });
+  res.json({
+    exportedAt: new Date().toISOString(),
+    user: {
+      ...safeData,
+      practiceWorks: practiceWorks.map(({ image, imageMimeType, ...work }) => ({
+        ...work,
+        image: image
+          ? { mimeType: imageMimeType, base64: Buffer.from(image).toString('base64') }
+          : null,
+      })),
+    },
+  });
 };

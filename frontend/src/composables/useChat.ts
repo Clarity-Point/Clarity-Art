@@ -24,9 +24,12 @@ interface ChatStreamData {
   sessionId?: string;
   riskLevel?: string;
   error?: string;
+  code?: string;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+const AI_CONSENT_MESSAGE =
+  'Для внешнего AI-провайдера нужно ваше согласие. Откройте «Профиль → Терапевт и данные».';
 
 /**
  * Chat state and behaviour for ChatComponent: session history, SSE streaming
@@ -132,6 +135,8 @@ export function useChat() {
 
     const controller = new AbortController();
     activeController = controller;
+    let accepted = false;
+    let terminalEvent = false;
 
     try {
       const response = await fetch(`${API_URL}/chat/stream`, {
@@ -163,14 +168,24 @@ export function useChat() {
         for (const line of event.split('\n')) {
           if (!line.startsWith('data: ')) continue;
           const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') continue;
+          if (dataStr === '[DONE]') {
+            terminalEvent = true;
+            continue;
+          }
           try {
             const data: ChatStreamData = JSON.parse(dataStr);
             if (data.content && !disposed) messages.value[aiMessageIndex].text += data.content;
-            if (data.sessionId) currentSessionId.value = data.sessionId;
+            if (data.sessionId) {
+              accepted = true;
+              currentSessionId.value = data.sessionId;
+            }
             if (data.riskLevel === 'high') showEmergency.value = true;
             if (data.error && !disposed) {
-              messages.value[aiMessageIndex].text = 'Не удалось получить ответ.';
+              terminalEvent = true;
+              messages.value[aiMessageIndex].text =
+                data.code === 'AI_CONSENT_REQUIRED'
+                  ? AI_CONSENT_MESSAGE
+                  : 'Не удалось получить ответ.';
             }
           } catch {
             // A malformed provider event is ignored without discarding the rest.
@@ -188,14 +203,16 @@ export function useChat() {
       }
       buffer += decoder.decode();
       if (buffer.trim()) processEvent(buffer);
-      if (!controller.signal.aborted) await fetchSessions();
+      if (controller.signal.aborted) return;
+      if (!terminalEvent) throw new Error('Chat stream ended before completion');
+      await fetchSessions();
     } catch (error) {
       if (controller.signal.aborted) return;
       console.error('Error sending message:');
-      if (!newMessage.value) newMessage.value = userMessageText;
+      if (!accepted && !newMessage.value) newMessage.value = userMessageText;
       messages.value[aiMessageIndex].text =
         error instanceof Error && error.message === 'AI_CONSENT_REQUIRED'
-          ? 'Для внешнего AI-провайдера нужно ваше согласие. Откройте «Профиль → Терапевт и данные».'
+          ? AI_CONSENT_MESSAGE
           : 'Не удалось получить ответ. Проверьте соединение и попробуйте ещё раз.';
     } finally {
       // Only clear the flag if this request still owns it: an aborted stream

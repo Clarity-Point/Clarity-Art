@@ -156,6 +156,13 @@ const mainNav = [
 ];
 
 const practiceNav = [
+  {
+    to: '/practices',
+    icon: 'palette',
+    name: 'Творческая пауза',
+    desc: 'Упражнения для бумаги и холста',
+  },
+  { to: '/practice-album', icon: 'image', name: 'Мой альбом', desc: 'Личные работы и подписи' },
   { to: '/breathing', icon: 'wind', name: 'Дыхание', desc: 'Успокоиться за 3 минуты' },
   { to: '/art-therapy-music', icon: 'music', name: 'Музыка', desc: 'Звуки для расслабления' },
   { to: '/knowledge', icon: 'book', name: 'Библиотека', desc: 'Статьи и материалы' },

@@ -252,9 +252,10 @@ const reloadSaved = () => {
     void reloadDraft();
 };
 const saveEntry = async () => {
-  if (isSavingEntry.value || !(await flushDraft())) return;
-  await submitNewEntry();
-  if (!newEntryText.value) await flushDraft();
+  const userId = auth.user?.id;
+  if (!userId || isSavingEntry.value || !(await flushDraft())) return;
+  await submitNewEntry(userId);
+  if (auth.user?.id === userId && !newEntryText.value) await flushDraft();
 };
 const route = useRoute();
 const auth = useAuthStore();

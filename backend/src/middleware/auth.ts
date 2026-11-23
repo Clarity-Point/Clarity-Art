@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import { JWT_SECRET } from '../config/secrets';
-import { AI_REQUIRES_CONSENT } from '../config/ai';
 import { canUseConfiguredAI } from '../services/aiConsentService';
 
 export interface AuthRequest extends Request {
@@ -76,11 +75,26 @@ export const isAdmin = checkRole(['ADMIN']);
 export const isTherapist = checkRole(['THERAPIST', 'ADMIN']);
 export const isOrgAdmin = checkRole(['ORG_ADMIN', 'ADMIN']);
 
-export const requireAIConsent = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-  if (!AI_REQUIRES_CONSENT || (await canUseConfiguredAI(req.user.id))) return next();
+export function requireExpectedUser(req: AuthRequest, res: Response, next: NextFunction) {
+  const expected = req.get('X-Expected-User-Id');
+  if (expected !== undefined && expected !== req.user?.id) {
+    return res.status(409).json({
+      error: 'Аккаунт изменился в другой вкладке. Скопируйте текст и обновите страницу.',
+      code: 'SESSION_CHANGED',
+    });
+  }
+  next();
+}
+
+export function sendAIConsentRequired(res: Response) {
   return res.status(412).json({
     error: 'Для внешнего AI-провайдера требуется явное согласие в настройках профиля',
     code: 'AI_CONSENT_REQUIRED',
   });
+}
+
+export const requireAIConsent = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (await canUseConfiguredAI(req.user.id)) return next();
+  return sendAIConsentRequired(res);
 };

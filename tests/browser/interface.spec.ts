@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { practiceCatalog } from '../../backend/src/services/practiceCatalog';
 
 const exampleCourse = {
   id: 'audit-course',
@@ -56,6 +57,8 @@ async function mockApi(page: Page, failure = false) {
       data = { items: [], nextCursor: null };
     } else if (path === '/api/ai/status') {
       data = { enabled: false, requiresConsent: false };
+    } else if (path === '/api/practices/catalog') {
+      data = practiceCatalog;
     } else if (path === '/api/analytics/correlations') {
       data = { insights: [] };
     } else if (path === '/api/org/stats') {
@@ -89,6 +92,10 @@ const routes = [
   '/breathing',
   '/art-therapy-music',
   '/knowledge',
+  '/practices',
+  '/practices/two-lines',
+  '/practice-album',
+  '/practice-cards',
   '/admin',
   '/therapist',
   '/org-admin',

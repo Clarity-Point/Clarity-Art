@@ -50,7 +50,7 @@ export default tseslint.config(
       'backend/**/*.{ts,js}',
       'scripts/**/*.{js,mjs,cjs}',
       '**/*.config.{ts,js}',
-      'tests/browser/**/*.ts',
+      'tests/**/*.{ts,mjs}',
       '**/*.cjs',
     ],
     languageOptions: { globals: { ...globals.node } },
@@ -62,7 +62,6 @@ export default tseslint.config(
   // Seed and maintenance scripts under prisma/ are CLI tools — console is fine there.
   {
     files: ['backend/src/**/*.ts'],
-    ignores: ['backend/src/tests/**'],
     rules: {
       'no-console': 'error',
     },

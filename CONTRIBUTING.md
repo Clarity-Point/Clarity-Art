@@ -9,7 +9,7 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 - **Report a bug** — open an issue with reproduction steps.
 - **Suggest a feature** — describe the use case before the solution.
-- **Improve documentation** — including translations; the docs are bilingual (EN/RU).
+- **Improve documentation** — including the English and Russian sections of the README.
 - **Write code** — see below.
 
 Vulnerabilities are the one exception: **never** open a public issue for them.
@@ -17,56 +17,28 @@ Follow [SECURITY.md](SECURITY.md) instead.
 
 ## Getting started
 
-Requires **Node.js 22.12+**, and either Docker or a local PostgreSQL.
-
 ```bash
 git clone https://github.com/Clarity-Point/Clarity-Art.git
 cd Clarity-Art
 git checkout -b feat/short-description
 ```
 
-### Option A — Docker (nothing to install)
-
-```bash
-cp .env.example .env                       # set JWT_SECRET and POSTGRES_PASSWORD
-docker compose -f docker-compose.dev.yml up --build
-```
-
-Frontend http://localhost:5173 · backend http://localhost:3100 · Swagger
-http://localhost:3100/api-docs. Both hot-reload on save.
-
-### Option B — On the host
-
-```bash
-npm install
-cp backend/.env.example backend/.env       # JWT_SECRET is required
-cp frontend/.env.example frontend/.env
-
-docker compose -f docker-compose.dev.yml up -d db   # or your own PostgreSQL
-
-cd backend
-npx prisma migrate deploy
-npx prisma generate
-npm run prisma:seed                        # courses, achievements, demo accounts
-cd .. && npm start
-```
-
-Demo accounts (password `Demo1234!`): `user@demo.ru`, `therapist@demo.ru`,
-`orgadmin@demo.ru`, `admin@demo.ru`.
+Follow the [development setup](docs/operations/runbook.md#локальная-разработка)
+for Docker or host instructions.
 
 ## Before opening a pull request
 
-Run the same checks CI runs — all must pass:
+Run the repository checks from the root:
 
 ```bash
-npm run lint                                             # ESLint (root)
-npm run format:check                                     # Prettier
-cd backend  && npx tsc --noEmit && npm test              # types + Vitest
-cd frontend && npx vue-tsc --noEmit -p tsconfig.app.json # frontend types
-cd frontend && npm run build                             # production build
+npm run check
+npx playwright install chromium
+npm run test:browser
 ```
 
-Autofix formatting and lint with `npm run format` and `npm run lint:fix`.
+The [operations guide](docs/operations/runbook.md#проверки-перед-изменением-окружения)
+describes how to enable the PostgreSQL integration tests. Autofix formatting and
+lint with `npm run format` and `npm run lint:fix`.
 
 ## Code style
 
@@ -137,16 +109,8 @@ diagnosis, triage or emergency capability.
 
 ## Project layout
 
-```
-backend/     Express 5 · TypeScript · Prisma 7 · PostgreSQL
-  src/
-    config/       logger, prisma, swagger, secrets, AI provider
-    controllers/  route handlers
-    middleware/   auth, error handling, request logging, gamification
-    services/     AI, analytics, crisis screening
-    tests/        Vitest
-frontend/    Vue 3 · Vite · Pinia · Vue Router
-```
+See the [project map](docs/architecture/project-map.md) for package, test and
+documentation directories.
 
 ## Licence
 

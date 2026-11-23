@@ -29,6 +29,8 @@ export type AuditAction =
   | 'consent.ai_revoked'
   | 'privacy.therapist_access_granted'
   | 'privacy.therapist_access_revoked'
+  | 'privacy.practice_share_granted'
+  | 'privacy.practice_share_revoked'
   | 'privacy.image_published'
   | 'privacy.image_unpublished'
   | 'org.joined'

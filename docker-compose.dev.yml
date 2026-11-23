@@ -62,6 +62,7 @@ services:
       # Source is mounted for hot reload; the anonymous volumes keep the
       # container's own node_modules from being shadowed by the host's.
       - ./backend/src:/app/backend/src
+      - ./backend/tests:/app/backend/tests
       - ./backend/prisma:/app/backend/prisma
       - image_dev_data:/app/data/images
       - /app/node_modules
@@ -81,6 +82,7 @@ services:
       - '${FRONTEND_PORT:-5173}:5173'
     volumes:
       - ./frontend/src:/app/frontend/src
+      - ./frontend/tests:/app/frontend/tests
       - ./frontend/public:/app/frontend/public
       - ./frontend/index.html:/app/frontend/index.html
       - /app/node_modules

@@ -22,8 +22,10 @@ export const createDiaryEntry = async (req: AuthRequest, res: Response) => {
 
   try {
     const allowProvider = await canUseConfiguredAI(req.user.id);
-    const riskLevel = await analyzeCrisisRisk(safeContent, allowProvider);
-    const tags = await AIService.extractTags(safeContent, allowProvider);
+    const [riskLevel, tags] = await Promise.all([
+      analyzeCrisisRisk(safeContent, allowProvider),
+      AIService.extractTags(safeContent, allowProvider),
+    ]);
 
     const score = AnalyticsService.scoreForRisk(riskLevel);
     const entry = await prisma.$transaction(async (tx) => {
@@ -111,8 +113,10 @@ export const updateDiaryEntry = async (req: AuthRequest, res: Response) => {
       return res.status(409).json({ error: 'Запись изменена в другой вкладке.' });
 
     const allowProvider = await canUseConfiguredAI(req.user.id);
-    const riskLevel = await analyzeCrisisRisk(contentValidation.value, allowProvider);
-    const tags = await AIService.extractTags(contentValidation.value, allowProvider);
+    const [riskLevel, tags] = await Promise.all([
+      analyzeCrisisRisk(contentValidation.value, allowProvider),
+      AIService.extractTags(contentValidation.value, allowProvider),
+    ]);
     const score = AnalyticsService.scoreForRisk(riskLevel);
 
     const updated = await prisma.$transaction(async (tx) => {
