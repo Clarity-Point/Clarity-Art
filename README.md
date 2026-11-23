@@ -24,6 +24,26 @@ docker compose up -d
 миграции при запуске. Для работы из исходников используйте
 [инструкцию по разработке](docs/operations/runbook.md#локальная-разработка).
 
+## Для преподавателей ИЗО
+
+Карточка «Три формы» подходит для короткого упражнения по композиции. В
+развёрнутом приложении откройте `/practice-cards/three-shapes`, чтобы распечатать
+карточку. Для работы на цифровом холсте войдите в аккаунт и откройте «Три формы»
+в разделе «Творческая пауза».
+
+1. Предложите ученику расположить три простые фигуры и назвать, куда должен
+   сначала посмотреть зритель. Отложите первый эскиз на бумаге или скачайте его
+   с холста до правки.
+2. Обсудите, какая деталь притягивает взгляд. Испытайте одно изменение размера,
+   положения или расстояния и сохраните второй эскиз.
+3. Сравните оба рисунка. Попросите ученика описать изменение и объяснить, какой
+   вариант он выбрал и почему.
+
+Для обратной связи достаточно двух выбранных эскизов и короткого объяснения.
+Используйте согласованный в учреждении способ обмена учебными работами.
+Подробнее о печати, холсте и альбоме читайте в описании
+[творческих практик](docs/operations/product-features.md#творческая-пауза-и-альбом).
+
 ## Документация
 
 | Раздел                                   | Где читать                                                                                                                           |
@@ -50,3 +70,15 @@ For a local installation, save [docker-compose.yml](docker-compose.yml) and
 Open [localhost](http://localhost). See the
 [operations guide](docs/operations/runbook.md) for source setup and AI
 configuration, and [Contributing](CONTRIBUTING.md) for development checks.
+
+### For visual arts educators
+
+Use the “Three Shapes” exercise («Три формы») to discuss one compositional
+decision. Ask the learner where the viewer should look first. Save the first
+sketch, test one change in size, position, or spacing, and save the trial. Ask
+the learner to describe the change and explain which version they chose.
+
+Print the card from `/practice-cards/three-shapes` on your deployed instance. To
+work digitally, sign in and open the exercise in the creative practices section
+(«Творческая пауза»). Download the first sketch before editing the canvas. Use
+your institution’s approved channel to exchange the selected sketches.
