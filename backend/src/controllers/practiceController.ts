@@ -3,26 +3,32 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../config/prisma';
 import type { AuthRequest } from '../middleware/auth';
-import { validateImageInput } from '../security/inputValidation';
 import { recordAudit } from '../services/auditService';
-import { isPracticeId } from '../services/practiceCatalog';
+import {
+  assertWorkCapacity,
+  caption,
+  decodePracticeImage,
+  fail,
+  idSchema,
+  imageSchema,
+  MAX_WORKS,
+  parseId,
+  practiceIdSchema,
+  withOwner,
+  workResponse,
+  workSelect,
+} from '../services/practiceStorage';
 
-const MAX_IMAGE_BYTES = 1024 * 1024;
-const MAX_WORKS = 30;
+import {
+  activePracticeShare,
+  notifyPractice,
+  practiceShareNotice,
+  recipientScope,
+} from '../services/practiceNotifications';
+
 const MAX_REFLECTIONS = 20;
 const MAX_SHARES = 20;
 const SHARE_PAGE_SIZE = 20;
-const idSchema = z.uuid();
-const practiceIdSchema = z.string().max(40).refine(isPracticeId);
-const caption = z
-  .string()
-  .trim()
-  .max(600)
-  .refine((text) => !text.includes('\0'));
-const imageSchema = z.object({
-  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
-  base64: z.string().max(Math.ceil(MAX_IMAGE_BYTES / 3) * 4),
-});
 const workSchema = z
   .object({
     id: idSchema,
@@ -53,51 +59,15 @@ const shareSchema = z
   .object({
     id: idSchema,
     therapistId: idSchema,
+    allowRecommendation: z.boolean().default(false),
     items: z.array(itemSchema).min(1).max(8),
   })
   .refine(({ items }) => new Set(items.map((item) => item.workId)).size === items.length);
-
-const workSelect = {
-  id: true,
-  practiceId: true,
-  title: true,
-  note: true,
-  imageMimeType: true,
-  createdAt: true,
-  reflections: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
-} satisfies Prisma.PracticeWorkSelect;
 
 const shareItems = {
   orderBy: { position: 'asc' },
   select: { workId: true, title: true, note: true, reflections: true, includesImage: true },
 } satisfies Prisma.PracticeShare$itemsArgs;
-
-function fail(status: number, message: string): never {
-  throw Object.assign(new Error(message), { status });
-}
-
-function withOwner<T>(userId: string, action: (tx: Prisma.TransactionClient) => Promise<T>) {
-  return prisma.$transaction(
-    async (tx) => {
-      const locked = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM "User" WHERE id = ${userId} FOR NO KEY UPDATE`;
-      if (!locked.length) fail(401, 'Сессия завершена. Войдите снова.');
-      return action(tx);
-    },
-    { isolationLevel: 'ReadCommitted' },
-  );
-}
-
-function parseId(value: unknown) {
-  const parsed = idSchema.safeParse(value);
-  if (!parsed.success) fail(404, 'Запись не найдена.');
-  return parsed.data;
-}
-
-function workResponse(work: Prisma.PracticeWorkGetPayload<{ select: typeof workSelect }>) {
-  const { imageMimeType, ...data } = work;
-  return { ...data, hasImage: Boolean(imageMimeType) };
-}
 
 function sendImage(
   res: Response,
@@ -106,15 +76,6 @@ function sendImage(
 ) {
   if (!image || !mimeType) return res.status(404).json({ error: 'Изображение не найдено.' });
   return res.type(mimeType).send(Buffer.from(image));
-}
-
-function recipientScope(therapistId: string) {
-  return {
-    therapistId,
-    therapist: { role: 'THERAPIST' },
-    revokedAt: null,
-    items: { some: {} },
-  } satisfies Prisma.PracticeShareWhereInput;
 }
 
 export async function listProgress(req: AuthRequest, res: Response) {
@@ -150,15 +111,7 @@ export async function createWork(req: AuthRequest, res: Response) {
   if (!parsed.success)
     return res.status(400).json({ error: 'Укажите название и добавьте рисунок или подпись.' });
   const { image, id: requestId, ...data } = parsed.data;
-  let bytes: Buffer<ArrayBuffer> | undefined;
-  if (image) {
-    const validation = validateImageInput(image.mimeType, image.base64, MAX_IMAGE_BYTES + 2);
-    if (!validation.ok)
-      return res.status(400).json({ error: 'Выберите изображение PNG, JPEG или WebP до 1 МиБ.' });
-    bytes = Buffer.from(image.base64, 'base64');
-    if (bytes.length > MAX_IMAGE_BYTES)
-      return res.status(400).json({ error: 'Изображение больше 1 МиБ.' });
-  }
+  const bytes = image ? decodePracticeImage(image) : undefined;
   const userId = req.user!.id;
   const work = await withOwner(userId, async (tx) => {
     const key = { userId_requestId: { userId, requestId } };
@@ -169,9 +122,7 @@ export async function createWork(req: AuthRequest, res: Response) {
       select: workSelect,
     });
     if (existing) return existing;
-    if ((await tx.practiceWork.count({ where: { userId } })) >= MAX_WORKS) {
-      fail(409, 'В альбоме уже 30 работ. Удалите одну из них перед сохранением новой.');
-    }
+    await assertWorkCapacity(tx, userId);
     return tx.practiceWork.create({
       data: { ...data, userId, requestId, image: bytes, imageMimeType: image?.mimeType },
       select: workSelect,
@@ -191,10 +142,21 @@ export async function deleteWork(req: AuthRequest, res: Response) {
     if (!work) return;
     await tx.practiceWork.deleteMany({ where: { id, userId } });
     await tx.practiceWorkRemoval.create({ data: { userId, requestId: work.requestId } });
-    await tx.practiceShare.updateMany({
+    const emptyShares = await tx.practiceShare.updateManyAndReturn({
       where: { ownerId: userId, revokedAt: null, items: { none: {} } },
-      data: { revokedAt: new Date() },
+      data: {
+        revokedAt: new Date(),
+        acknowledgedAt: null,
+        recommendedPracticeId: null,
+        recommendationDismissedAt: null,
+        allowRecommendation: false,
+      },
+      select: { id: true },
     });
+    if (emptyShares.length)
+      await tx.notification.deleteMany({
+        where: { practiceShareId: { in: emptyShares.map(({ id }) => id) } },
+      });
   });
   res.sendStatus(204);
 }
@@ -232,12 +194,16 @@ export async function readWorkImage(req: AuthRequest, res: Response) {
 
 export async function listOutgoingShares(req: AuthRequest, res: Response) {
   const shares = await prisma.practiceShare.findMany({
-    where: { ownerId: req.user!.id, revokedAt: null },
+    where: { ownerId: req.user!.id, ...activePracticeShare },
     select: {
       id: true,
       therapistId: true,
       createdAt: true,
-      therapist: { select: { profile: { select: { name: true } } } },
+      acknowledgedAt: true,
+      allowRecommendation: true,
+      recommendedPracticeId: true,
+      recommendationDismissedAt: true,
+      therapist: { select: { profile: { select: { name: true } }, role: true } },
       items: { orderBy: { position: 'asc' }, select: { title: true } },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -246,8 +212,12 @@ export async function listOutgoingShares(req: AuthRequest, res: Response) {
   res.json(
     shares
       .filter(({ therapist, items }) => therapist && items.length)
-      .map(({ therapist, ...share }) => ({
+      .map(({ therapist, recommendedPracticeId, recommendationDismissedAt, ...share }) => ({
         ...share,
+        recommendedPracticeId:
+          therapist.role === 'THERAPIST' && share.allowRecommendation && !recommendationDismissedAt
+            ? recommendedPracticeId
+            : null,
         therapistName: therapist.profile?.name || 'Специалист',
       })),
   );
@@ -258,7 +228,7 @@ export async function createShare(req: AuthRequest, res: Response) {
   if (!parsed.success)
     return res.status(400).json({ error: 'Выберите специалиста и содержимое для передачи.' });
   const ownerId = req.user!.id;
-  const { id: requestId, therapistId, items } = parsed.data;
+  const { id: requestId, therapistId, items, allowRecommendation } = parsed.data;
   if (ownerId === therapistId)
     return res.status(400).json({ error: 'Выберите другого получателя.' });
   const result = await withOwner(ownerId, async (tx) => {
@@ -306,12 +276,13 @@ export async function createShare(req: AuthRequest, res: Response) {
       };
     });
     const { id } = await tx.practiceShare.create({
-      data: { ownerId, therapistId, requestId },
+      data: { ownerId, therapistId, requestId, allowRecommendation },
       select: { id: true },
     });
     await tx.practiceShareItem.createMany({
       data: snapshots.map((item) => ({ shareId: id, ...item })),
     });
+    await notifyPractice(tx, therapistId, id, practiceShareNotice);
     return { id, created: true };
   });
   if (result.created) {
@@ -332,10 +303,17 @@ export async function revokeShare(req: AuthRequest, res: Response) {
   const revoked = await withOwner(ownerId, async (tx) => {
     const result = await tx.practiceShare.updateMany({
       where: { id, ownerId, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: {
+        revokedAt: new Date(),
+        acknowledgedAt: null,
+        recommendedPracticeId: null,
+        recommendationDismissedAt: null,
+        allowRecommendation: false,
+      },
     });
     if (!result.count) return false;
     await tx.practiceShareItem.deleteMany({ where: { shareId: id, ownerId } });
+    await tx.notification.deleteMany({ where: { practiceShareId: id } });
     return true;
   });
   if (revoked) {
@@ -371,6 +349,7 @@ export async function listIncomingShares(req: AuthRequest, res: Response) {
     select: {
       id: true,
       createdAt: true,
+      acknowledgedAt: true,
       owner: { select: { profile: { select: { name: true } } } },
       items: { select: { workId: true }, where: { share: scope } },
     },
@@ -381,9 +360,10 @@ export async function listIncomingShares(req: AuthRequest, res: Response) {
   res.json({
     items: page
       .filter(({ owner, items }) => owner && items.length)
-      .map(({ owner, id, createdAt, items }) => ({
+      .map(({ owner, id, createdAt, acknowledgedAt, items }) => ({
         id,
         createdAt,
+        acknowledgedAt,
         ownerName: owner.profile?.name || 'Участник',
         workCount: items.length,
       })),
@@ -395,7 +375,12 @@ export async function readIncomingShare(req: AuthRequest, res: Response) {
   const scope = recipientScope(req.user!.id);
   const share = await prisma.practiceShare.findFirst({
     where: { ...scope, id: parseId(req.params.id) },
-    select: { items: { ...shareItems, where: { share: scope } } },
+    select: {
+      acknowledgedAt: true,
+      allowRecommendation: true,
+      recommendedPracticeId: true,
+      items: { ...shareItems, where: { share: scope } },
+    },
   });
   if (!share?.items.length) return res.status(404).json({ error: 'Подборка недоступна.' });
   res.json(share);

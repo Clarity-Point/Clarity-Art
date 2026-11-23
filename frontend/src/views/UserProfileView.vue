@@ -276,8 +276,9 @@
     <section v-else-if="activeTab === 'history'" class="tab-panel stack">
       <div
         v-if="
-          storeProfileRef.dataTruncated &&
-          Object.values(storeProfileRef.dataTruncated).some(Boolean)
+          chatsTruncated ||
+          (storeProfileRef.dataTruncated &&
+            Object.values(storeProfileRef.dataTruncated).some(Boolean))
         "
         class="card history-limit-notice"
         role="status"
@@ -433,23 +434,19 @@
 
       <section class="card stack">
         <div class="section-head"><h2 class="section-title">История чатов с ИИ</h2></div>
-        <div
-          v-if="storeProfileRef.chatSessions && storeProfileRef.chatSessions.length > 0"
-          class="stack"
-        >
-          <div
-            v-for="(session, index) in storeProfileRef.chatSessions"
-            :key="index"
-            class="history-entry"
-          >
+        <p v-if="chatHistoryBusy" class="muted" role="status">Загружаем историю чатов…</p>
+        <div v-else-if="chatHistoryError" role="alert">
+          <p>{{ chatHistoryError }}</p>
+          <button class="btn-outline" type="button" @click="loadChatHistory">Повторить</button>
+        </div>
+        <div v-else-if="profileChats?.length" class="stack">
+          <div v-for="(session, index) in profileChats" :key="index" class="history-entry">
             <button
               type="button"
               class="row-between session-toggle"
               @click="toggleExpand('chat-' + index)"
             >
-              <span class="entry-title"
-                >Сессия №{{ storeProfileRef.chatSessions.length - index }}</span
-              >
+              <span class="entry-title">Сессия №{{ profileChats.length - index }}</span>
               <span class="row faint">
                 <span>{{ session.length }} сообщений</span>
                 <Icon
@@ -492,10 +489,14 @@
             AI работает локально внутри этого развёртывания. Дневник, изображения и сообщения не
             передаются внешнему провайдеру.
           </p>
+          <p v-else-if="!aiStatus.policy" class="muted">
+            Внешний ИИ станет доступен после настройки поставщика оператором.
+          </p>
           <template v-else>
             <p class="muted">
-              Для AI-функций настроен внешний провайдер. Без вашего явного согласия чат, рисунки и
-              профиль не будут ему отправлены; дневник продолжит работать на локальных правилах.
+              Внешний поставщик — {{ aiStatus.policy.label }}. С вашего согласия он будет
+              обрабатывать запросы чата, рисунки и данные, использованные для анализа профиля и
+              дневника.
             </p>
             <label class="switch-row">
               <span>Разрешить передачу данных внешнему AI-провайдеру</span>
@@ -682,7 +683,7 @@ import AiAvatar from '@/components/AiAvatar.vue';
 import AchievementsList from '@/components/AchievementsList.vue';
 import Icon from '@/components/Icon.vue';
 import { useProfileForm } from '@/composables/useProfileForm';
-import { useProfileHistory } from '@/composables/useProfileHistory';
+import { useProfileChats, useProfileHistory } from '@/composables/useProfileHistory';
 import { useProfileActions } from '@/composables/useProfileActions';
 import { useAiConsent } from '@/composables/useAiConsent';
 
@@ -731,10 +732,21 @@ const {
 } = useProfileActions();
 
 const { aiStatus, isAiStatusLoading, isAiConsentSaving, setConsent } = useAiConsent();
-const onConsentChange = (event: Event) => setConsent((event.target as HTMLInputElement).checked);
+async function onConsentChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  await setConsent(input.checked);
+  if (input.isConnected) input.checked = aiStatus.value?.consentGiven ?? false;
+}
 
 // View-only: which tab of the profile is currently shown.
 const activeTab = ref<'profile' | 'health' | 'achievements' | 'history' | 'therapist'>('profile');
+const {
+  sessions: profileChats,
+  truncated: chatsTruncated,
+  busy: chatHistoryBusy,
+  error: chatHistoryError,
+  load: loadChatHistory,
+} = useProfileChats(() => activeTab.value === 'history');
 const tabs: Array<{ id: typeof activeTab.value; label: string; icon: string }> = [
   { id: 'profile', label: 'Профиль', icon: 'user' },
   { id: 'health', label: 'Здоровье', icon: 'activity' },

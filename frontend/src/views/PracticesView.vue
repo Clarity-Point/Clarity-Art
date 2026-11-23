@@ -1,11 +1,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import Icon from '@/components/Icon.vue';
 import PracticeSession from '@/features/practices/PracticeSession.vue';
+import { useLatestPracticeDraft } from '@/features/practices/useLatestPracticeDraft';
 import { getCatalog, practiceError, usePracticeApi, type Catalog } from '@/features/practices/api';
 
 const route = useRoute();
+const router = useRouter();
+const intentions = computed(() => catalog.value?.intentions ?? []);
+const intent = computed(() => intentions.value.find(({ id }) => route.query.intent === id));
+const intentQuery = computed(() => (intent.value ? { intent: intent.value.id } : {}));
+function setIntent(value: string) {
+  void router.push({
+    name: 'practices',
+    params: { practiceId: '' },
+    query: value ? { intent: value } : {},
+  });
+}
+function reset() {
+  duration.value = 0;
+  material.value = '';
+  if (intent.value) setIntent('');
+}
+
 const { auth, capture, isCurrent, request } = usePracticeApi(true);
 const catalog = ref<Catalog>();
 const completed = ref<string[]>([]);
@@ -18,6 +36,7 @@ const byId = computed(() => new Map(practices.value.map((practice) => [practice.
 const activeId = computed(() =>
   typeof route.params.practiceId === 'string' ? route.params.practiceId : '',
 );
+const latest = useLatestPracticeDraft(() => !activeId.value);
 const active = computed(() => byId.value.get(activeId.value));
 const series = computed(() =>
   catalog.value?.series.find(
@@ -32,6 +51,7 @@ const next = computed(() => {
 const visible = computed(() =>
   practices.value.filter(
     (practice) =>
+      (!intent.value || intent.value.practiceIds.includes(practice.id)) &&
       (!duration.value || practice.minutes <= duration.value) &&
       (!material.value || practice.material === material.value),
   ),
@@ -77,7 +97,11 @@ onMounted(loadCatalog);
   <div class="page practice-page">
     <header class="page-head practice-head">
       <div>
-        <RouterLink v-if="activeId" class="back-link" to="/practices">
+        <RouterLink
+          v-if="activeId"
+          class="back-link"
+          :to="{ name: 'practices', params: { practiceId: '' }, query: intentQuery }"
+        >
           <Icon name="arrow-left" :size="17" /> Все практики
         </RouterLink>
         <h1 class="page-title display">{{ active?.title ?? 'Творческая пауза' }}</h1>
@@ -90,6 +114,13 @@ onMounted(loadCatalog);
         </p>
       </div>
       <nav class="practice-links" aria-label="Практики">
+        <RouterLink
+          v-if="!activeId && latest"
+          class="btn-primary"
+          :to="{ name: 'practices', params: { practiceId: latest.practiceId } }"
+        >
+          Продолжить практику
+        </RouterLink>
         <RouterLink class="btn-outline" to="/practice-album"
           ><Icon name="image" :size="17" /> Мой альбом</RouterLink
         >
@@ -126,6 +157,19 @@ onMounted(loadCatalog);
       <section aria-labelledby="practice-catalog" class="catalog-section">
         <h2 id="practice-catalog">Одно упражнение</h2>
         <div class="catalog-filters">
+          <div v-if="intentions.length" class="field">
+            <label for="practice-intent">Чего хочется сейчас</label>
+            <select
+              id="practice-intent"
+              :value="intent?.id ?? ''"
+              @change="setIntent(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">Все намерения</option>
+              <option v-for="item in intentions" :key="item.id" :value="item.id">
+                {{ item.title }}
+              </option>
+            </select>
+          </div>
           <div class="field">
             <label for="practice-duration">Сколько есть времени</label>
             <select id="practice-duration" v-model.number="duration">
@@ -147,13 +191,13 @@ onMounted(loadCatalog);
           </div>
         </div>
         <p v-if="!visible.length" class="muted" role="status">
-          Попробуйте изменить время или материалы.
+          <button class="btn-outline" type="button" @click="reset">Сбросить фильтры</button>
         </p>
         <ul v-else class="practice-list">
           <li v-for="practice in visible" :key="practice.id">
             <RouterLink
               class="practice-row"
-              :to="{ name: 'practices', params: { practiceId: practice.id } }"
+              :to="{ name: 'practices', params: { practiceId: practice.id }, query: intentQuery }"
             >
               <span class="practice-time">{{ practice.minutes }} мин</span>
               <span>

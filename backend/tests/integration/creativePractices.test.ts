@@ -7,6 +7,7 @@ import request from 'supertest';
 import app from '../../src/index';
 import prisma from '../../src/config/prisma';
 import { JWT_SECRET } from '../../src/config/secrets';
+import { AI_CONSENT_POLICY } from '../../src/config/ai';
 
 const thumbnail =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlEkYQAAAAASUVORK5CYII=';
@@ -314,6 +315,222 @@ describe.runIf(process.env.RUN_DATABASE_TESTS === 'true')(
         .expect(204);
       expect(await prisma.practiceWork.findUnique({ where: { id: workId } })).toBeNull();
       expect(await prisma.practiceShareItem.count({ where: { workId } })).toBe(0);
+    });
+    it('persists versioned drafts and finalizes one album entry', async () => {
+      const path = '/api/practices/drafts/three-shapes';
+      const snapshot = {
+        title: 'Shapes',
+        note: 'Private draft',
+        mode: 'canvas',
+        attachmentKind: 'canvas',
+        image: png,
+      };
+      const put = (
+        version: number,
+        replacement: typeof snapshot | null,
+        mutationId = randomUUID(),
+      ) => auth(request(app).put(path), owner).send({ version, mutationId, snapshot: replacement });
+      const mutationId = randomUUID();
+      await request(app).put(path).send({ version: 0, mutationId, snapshot }).expect(401);
+      await auth(request(app).put(path), owner, someoneElse)
+        .send({ version: 0, mutationId, snapshot })
+        .expect(409);
+      expect((await put(0, snapshot, mutationId).expect(200)).body.version).toBe(1);
+      expect((await put(0, snapshot, mutationId).expect(409)).body.code).toBe('DRAFT_CONFLICT');
+      expect(
+        (await auth(request(app).get(path), owner).expect('Cache-Control', 'no-store').expect(200))
+          .body,
+      ).toMatchObject({ version: 1, mutationId, snapshot });
+      expect((await auth(request(app).get(path), someoneElse).expect(200)).body.version).toBe(0);
+      expect(
+        (await auth(request(app).get('/api/practices/drafts'), owner).expect(200)).body,
+      ).toEqual([{ practiceId: 'three-shapes', updatedAt: expect.any(String) }]);
+      const exported = await auth(request(app).get('/api/account/export'), owner).expect(200);
+      expect(exported.body.user.practiceDrafts[0]).toMatchObject({
+        practiceId: 'three-shapes',
+        image: png,
+      });
+      const id = randomUUID();
+      const finish = (target = path) =>
+        auth(request(app).post(`${target}/finalize`), owner).send({ version: 1, id });
+      const [first, second] = await Promise.all([finish().expect(201), finish().expect(201)]);
+      expect(first.body.id).toBe(second.body.id);
+      await finish('/api/practices/drafts/two-lines').expect(409);
+      await put(1, snapshot).expect(409);
+      expect((await put(2, snapshot).expect(200)).body.version).toBe(3);
+      await finish().expect(201);
+      expect((await auth(request(app).get(path), owner).expect(200)).body.snapshot.note).toBe(
+        'Private draft',
+      );
+      await auth(request(app).delete(`/api/practices/works/${first.body.id}`), owner).expect(204);
+      await finish().expect(410);
+      await finish('/api/practices/drafts/two-lines').expect(410);
+      await put(3, null).expect(200);
+      await put(3, snapshot).expect(409);
+      expect(
+        (await auth(request(app).get('/api/practices/drafts'), owner).expect(200)).body,
+      ).toEqual([]);
+    });
+
+    it('scopes notifications, acknowledgements and optional recommendations to active shares', async () => {
+      const work = await createWork(owner, {
+        id: randomUUID(),
+        title: 'Feedback',
+        note: 'Hidden note',
+      }).expect(201);
+      const payload = {
+        id: randomUUID(),
+        therapistId: therapist,
+        allowRecommendation: true,
+        items: [
+          { workId: work.body.id, includeNote: true, includeImage: false, reflectionIds: [] },
+        ],
+      };
+      const {
+        body: { id },
+      } = await createShare(owner, payload).expect(201);
+      await createShare(owner, payload).expect(200);
+      const therapistPath = `/api/therapist/practice-shares/${id}`;
+      const ownerPath = `/api/practices/shares/${id}`;
+      const notifications = (user: string) => auth(request(app).get('/api/notifications'), user);
+      const ack = (user: string) =>
+        auth(request(app).put(`${therapistPath}/acknowledgement`), user);
+      const rec = (user: string, practiceId: string) =>
+        auth(request(app).put(`${therapistPath}/recommendation`), user).send({ practiceId });
+      const notice = (await notifications(therapist).expect(200)).body.find(
+        (item: { practiceShareId: string }) => item.practiceShareId === id,
+      );
+      expect(notice?.type).toBe('practice_share');
+      expect(JSON.stringify(notice)).not.toContain('Hidden note');
+      expect(await prisma.notification.count({ where: { practiceShareId: id } })).toBe(1);
+      await ack(otherTherapist).expect(404);
+      await ack(admin).expect(403);
+      const first = await ack(therapist).expect(200);
+      expect((await ack(therapist).expect(200)).body).toEqual(first.body);
+      await rec(therapist, 'unknown').expect(400);
+      await rec(otherTherapist, 'two-lines').expect(404);
+      await rec(therapist, 'two-lines').expect(200);
+      await rec(therapist, 'two-lines').expect(200);
+      await rec(therapist, 'postcard').expect(409);
+      expect((await notifications(owner).expect(200)).body).toContainEqual(
+        expect.objectContaining({ type: 'practice_recommendation' }),
+      );
+      await auth(request(app).put(`${ownerPath}/recommendation/dismissal`), someoneElse).expect(
+        404,
+      );
+      await auth(request(app).put(`${ownerPath}/recommendation/dismissal`), owner).expect(204);
+      await rec(therapist, 'two-lines').expect(200);
+      expect(await prisma.notification.count({ where: { practiceShareId: id } })).toBe(1);
+      await prisma.user.update({ where: { id: therapist }, data: { role: 'USER' } });
+      await notifications(therapist).query({ cursor: notice.id }).expect(409);
+      expect((await notifications(therapist).expect(200)).body).not.toContainEqual(
+        expect.objectContaining({ id: notice.id }),
+      );
+      await auth(request(app).put(`/api/notifications/${notice.id}/read`), therapist).expect(404);
+      const exported = await auth(request(app).get('/api/account/export'), therapist).expect(200);
+      expect(exported.body.user.notifications).not.toContainEqual(
+        expect.objectContaining({ id: notice.id }),
+      );
+      await prisma.user.update({ where: { id: therapist }, data: { role: 'THERAPIST' } });
+      await auth(request(app).put(`${ownerPath}/recommendation-permission`), owner)
+        .send({ allowed: false })
+        .expect(204);
+      await rec(therapist, 'two-lines').expect(404);
+      await auth(request(app).delete(`/api/practices/works/${work.body.id}`), owner).expect(204);
+      await ack(therapist).expect(404);
+      expect(await prisma.notification.count({ where: { practiceShareId: id } })).toBe(0);
+    });
+
+    it('suppresses feedback events while rollout is disabled', async () => {
+      const work = await createWork(owner, {
+        id: randomUUID(),
+        title: 'Silent rollout',
+        note: 'Synthetic',
+      }).expect(201);
+      vi.stubEnv('PRACTICE_FEEDBACK_NOTIFICATIONS', 'false');
+      try {
+        const result = await createShare(owner, {
+          id: randomUUID(),
+          therapistId: therapist,
+          allowRecommendation: true,
+          items: [
+            { workId: work.body.id, includeNote: true, includeImage: false, reflectionIds: [] },
+          ],
+        }).expect(201);
+        await auth(
+          request(app).put(`/api/therapist/practice-shares/${result.body.id}/recommendation`),
+          therapist,
+        )
+          .send({ practiceId: 'two-lines' })
+          .expect(200);
+        expect(
+          await prisma.notification.count({ where: { practiceShareId: result.body.id } }),
+        ).toBe(0);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('rejects legacy or stale external AI consent before dispatch and supports explicit re-consent', async () => {
+      if (!AI_CONSENT_POLICY) throw new Error('Test provider policy is required');
+      await prisma.profile.create({ data: { userId: someoneElse, aiDataConsentAt: new Date() } });
+      const consent = (body: object, expected = someoneElse) =>
+        auth(request(app).put('/api/profile/ai-consent'), someoneElse, expected).send(body);
+      const status = () => auth(request(app).get('/api/ai/status'), someoneElse);
+      const provider = vi.spyOn(axios, 'post').mockResolvedValue({
+        data: { choices: [{ message: { content: 'Synthetic response' } }] },
+      });
+      const stream = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('unexpected stream'));
+      try {
+        expect((await status().expect(200)).body).toMatchObject({
+          consentGiven: false,
+          policy: AI_CONSENT_POLICY,
+        });
+        await auth(request(app).get('/api/ai/status'), someoneElse, owner).expect(409);
+        await prisma.profile.update({
+          where: { userId: someoneElse },
+          data: { aiDataConsentPolicyId: 'previous-policy' },
+        });
+        for (const path of [
+          '/api/chat',
+          '/api/chat/stream',
+          '/api/analyze-image',
+          '/api/profile/analysis',
+        ]) {
+          await auth(request(app).post(path), someoneElse)
+            .send({ message: 'Synthetic note' })
+            .expect(412);
+        }
+        const diary = await auth(request(app).post('/api/diary'), someoneElse)
+          .send({ content: 'Synthetic diary' })
+          .expect(201);
+        await auth(request(app).put(`/api/diary/${diary.body.id}`), someoneElse)
+          .send({ content: 'Edited synthetic diary', version: diary.body.version })
+          .expect(200);
+        expect(provider).not.toHaveBeenCalled();
+        expect(stream).not.toHaveBeenCalled();
+        await consent({ consent: true, policyId: 'old-provider' }).expect(409);
+        await consent({ consent: true, policyId: AI_CONSENT_POLICY.id }, owner).expect(409);
+        await consent({ consent: false }, owner).expect(409);
+        await consent({ consent: true, policyId: AI_CONSENT_POLICY.id }).expect(200);
+        expect((await status().expect(200)).body.consentGiven).toBe(true);
+        await auth(request(app).post('/api/chat'), someoneElse)
+          .send({ message: 'Synthetic note' })
+          .expect(200);
+        expect(provider).toHaveBeenCalled();
+        provider.mockClear();
+        await consent({ consent: false }).expect(200);
+        expect((await status().expect(200)).body.consentGiven).toBe(false);
+        await auth(request(app).post('/api/chat'), someoneElse)
+          .send({ message: 'After revoke' })
+          .expect(412);
+        expect(provider).not.toHaveBeenCalled();
+      } finally {
+        provider.mockRestore();
+        stream.mockRestore();
+      }
     });
   },
 );

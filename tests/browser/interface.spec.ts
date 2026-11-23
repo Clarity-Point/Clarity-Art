@@ -284,7 +284,7 @@ test('a late 401 from the previous session does not log out a newly signed-in us
 }) => {
   await mockApi(page);
   let account = 'old-account';
-  await page.route('**/api/profile', (route) =>
+  await page.route(/\/api\/profile(?:\?[^/]*)?$/, (route) =>
     route.fulfill({ json: { id: account, name: account, role: 'USER', streak: 0 } }),
   );
   let release!: () => void;
@@ -504,6 +504,9 @@ test('notifications recover from failure and load older pages with a total unrea
   await expect(page.getByText('Старое уведомление', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Загрузить ещё' })).toHaveCount(0);
   expect(cursors.at(-1)).toBe('older');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => cursors.filter((cursor) => cursor === 'older').length).toBe(2);
+  await expect(page.getByText('Старое уведомление', { exact: true })).toBeVisible();
 });
 
 test('mobile dashboard statistics fit with large numbers and wider text', async ({ page }) => {
@@ -674,7 +677,7 @@ test('organization ownership transfer requires confirmation and refreshes the ro
   await mockApi(page);
   await page.setViewportSize({ width: 320, height: 900 });
   let transferred = false;
-  await page.route('**/api/profile', (route) =>
+  await page.route(/\/api\/profile(?:\?[^/]*)?$/, (route) =>
     route.fulfill({
       json: {
         id: 'org-manager',
@@ -797,4 +800,57 @@ test('leaving an unsaved diary edit requires an explicit discard', async ({ page
   page.once('dialog', (dialog) => dialog.accept());
   await page.locator('.sb-item[href="/history"]').click();
   await expect(page).toHaveURL(/\/history$/);
+});
+
+test('opening profile history loads the transcripts on demand and can retry', async ({ page }) => {
+  await mockApi(page);
+  let profileView = '';
+  let historyCalls = 0;
+  await page.route(/\/api\/profile(?:\?[^/]*)?$/, (route) => {
+    profileView = new URL(route.request().url()).searchParams.get('view') || '';
+    return route.fulfill({ json: { id: 'chat-owner', role: 'USER', name: 'Профиль проверки' } });
+  });
+  await page.route('**/api/profile/chat-history', (route) => {
+    expect(route.request().headers()['x-expected-user-id']).toBe('chat-owner');
+    historyCalls++;
+    if (historyCalls === 1) return route.fulfill({ status: 503, json: { error: 'Unavailable' } });
+    return route.fulfill({
+      json: { truncated: true, sessions: [[{ sender: 'user', text: 'Сообщение из истории' }]] },
+    });
+  });
+  await page.goto('/profile');
+  await expect(page.getByRole('tab', { name: 'История', exact: true })).toBeVisible();
+  expect(profileView).toBe('summary');
+  expect(historyCalls).toBe(0);
+  await page.getByRole('tab', { name: 'История', exact: true }).click();
+  await expect(page.getByText('Не удалось загрузить историю чатов.')).toBeVisible();
+  await page.getByRole('alert').getByRole('button', { name: 'Повторить' }).click();
+  await expect(page.getByText('Сообщение из истории')).toBeVisible();
+  await expect(page.getByText(/Полная история без сокращений/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Профиль', exact: true }).click();
+  await page.getByRole('tab', { name: 'История', exact: true }).click();
+  expect(historyCalls).toBe(2);
+});
+
+test('a hidden tab pauses notification polling and refreshes on return', async ({ page }) => {
+  await mockApi(page);
+  await page.clock.install();
+  let calls = 0;
+  await page.route('**/api/notifications', (route) => {
+    calls++;
+    return route.fulfill({ json: [], headers: { 'X-Unread-Count': String(calls) } });
+  });
+  await page.goto('/');
+  await expect(page.locator('.noti-dot')).toHaveText('1');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.clock.fastForward(180_000);
+  expect(calls).toBe(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.locator('.noti-dot')).toHaveText('2');
 });

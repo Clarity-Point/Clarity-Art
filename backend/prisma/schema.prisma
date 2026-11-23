@@ -49,6 +49,7 @@ model User {
   galleryReports         GalleryReport[]
   hiddenImages           HiddenImage[]
   moodCheckIns           MoodCheckIn[]
+  practiceDrafts         PracticeDraft[]
   practiceWorks          PracticeWork[]
   practiceWorkRemovals   PracticeWorkRemoval[]
   practiceCompletions    PracticeCompletion[]
@@ -79,6 +80,7 @@ model Profile {
   sleepHours            Float?
   stepsCount            Int?
   heartRateAvg          Int?
+  aiDataConsentPolicyId String?
   aiDataConsentAt       DateTime?
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -314,15 +316,19 @@ model SentimentTrend {
 }
 
 model Notification {
-  id      String   @id @default(uuid())
-  userId  String
-  title   String
-  message String
-  type    String   @default("info")
-  isRead  Boolean  @default(false)
-  date    DateTime @default(now())
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String         @id @default(uuid())
+  userId          String
+  title           String
+  message         String
+  type            String         @default("info")
+  isRead          Boolean        @default(false)
+  date            DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practiceShareId String?
+  practiceShare   PracticeShare? @relation(fields: [practiceShareId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, practiceShareId, type])
+  @@index([practiceShareId])
   @@index([userId, isRead, date])
   @@index([userId, date, id])
 }
@@ -418,19 +424,37 @@ model ImageDeletion {
   @@index([nextAttemptAt])
 }
 
+model PracticeDraft {
+  userId         String
+  practiceId     String
+  version        Int
+  mutationId     String?
+  title          String
+  note           String
+  mode           String
+  attachmentKind String?
+  image          Bytes?
+  imageMimeType  String?
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, practiceId])
+}
+
 model PracticeWork {
-  id            String               @id @default(uuid())
-  userId        String
-  requestId     String
-  practiceId    String?
-  title         String
-  note          String
-  image         Bytes?
-  imageMimeType String?
-  createdAt     DateTime             @default(now())
-  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reflections   PracticeReflection[]
-  shareItems    PracticeShareItem[]
+  id                    String               @id @default(uuid())
+  userId                String
+  requestId             String
+  practiceId            String?
+  finalizedDraftVersion Int?
+  title                 String
+  note                  String
+  image                 Bytes?
+  imageMimeType         String?
+  createdAt             DateTime             @default(now())
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reflections           PracticeReflection[]
+  shareItems            PracticeShareItem[]
 
   @@unique([id, userId])
   @@unique([userId, requestId])
@@ -465,15 +489,20 @@ model PracticeCompletion {
 }
 
 model PracticeShare {
-  id          String              @id @default(uuid())
-  ownerId     String
-  requestId   String
-  therapistId String
-  createdAt   DateTime            @default(now())
-  revokedAt   DateTime?
-  owner       User                @relation("PracticeShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  therapist   User                @relation("PracticeShareRecipient", fields: [therapistId], references: [id], onDelete: Cascade)
-  items       PracticeShareItem[]
+  id                        String              @id @default(uuid())
+  ownerId                   String
+  requestId                 String
+  therapistId               String
+  createdAt                 DateTime            @default(now())
+  revokedAt                 DateTime?
+  acknowledgedAt            DateTime?
+  allowRecommendation       Boolean             @default(false)
+  recommendedPracticeId     String?
+  recommendationDismissedAt DateTime?
+  notifications             Notification[]
+  owner                     User                @relation("PracticeShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  therapist                 User                @relation("PracticeShareRecipient", fields: [therapistId], references: [id], onDelete: Cascade)
+  items                     PracticeShareItem[]
 
   @@unique([id, ownerId])
   @@unique([ownerId, requestId])

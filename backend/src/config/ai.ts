@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createLogger } from './logger';
 
 // Provider-agnostic AI configuration.
@@ -29,7 +30,7 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
 }
 
 const configuredBaseURL = process.env.AI_BASE_URL?.trim();
-export const AI_BASE_URL = configuredBaseURL || 'https://openrouter.ai/api/v1';
+export const AI_BASE_URL = configuredBaseURL?.replace(/\/+$/, '') || 'https://openrouter.ai/api/v1';
 
 export const AI_MODEL = process.env.AI_MODEL || 'openai/gpt-4o-mini';
 
@@ -66,6 +67,21 @@ export const AI_ENABLED = Boolean(configuredBaseURL ? configuredHost : AI_API_KE
 // after the user has explicitly opted in. Local/offline inference needs no such
 // transfer consent because data stays inside the deployment.
 export const AI_REQUIRES_CONSENT = AI_ENABLED && AI_DATA_PROCESSING_MODE === 'external';
+
+function getConsentPolicy() {
+  if (!AI_REQUIRES_CONSENT) return null;
+  const label = process.env.AI_PROVIDER_LABEL?.trim();
+  const revision = process.env.AI_PROVIDER_POLICY_REVISION?.trim();
+  if (!label || !revision || label.length > 120 || revision.length > 120) return null;
+  const url = new URL(AI_BASE_URL);
+  if (url.username || url.password || url.search || url.hash) return null;
+  const endpoint = url.href.replace(/\/+$/, '');
+  const id = createHash('sha256')
+    .update(JSON.stringify([endpoint, AI_MODEL, AI_VISION_MODEL, revision]))
+    .digest('hex');
+  return { id, label };
+}
+export const AI_CONSENT_POLICY = getConsentPolicy();
 
 /*
  * Provider timeouts. Without them a stalled upstream holds the request, its

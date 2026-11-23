@@ -3,6 +3,7 @@ import prisma from '../config/prisma';
 import { createLogger } from '../config/logger';
 import { AuthRequest } from '../middleware/auth';
 import { pageQuerySchema } from '../schemas';
+import { notificationVisibility } from '../services/practiceNotifications';
 
 const log = createLogger('notificationController');
 
@@ -12,15 +13,33 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
   if (!query.success) return res.status(400).json({ error: 'Некорректная страница уведомлений' });
   const { limit, cursor } = query.data;
   try {
-    const [notifications, unread] = await Promise.all([
-      prisma.notification.findMany({
-        where: { userId: req.user.id },
-        orderBy: [{ date: 'desc' }, { id: 'desc' }],
-        take: limit + 1,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      }),
-      prisma.notification.count({ where: { userId: req.user.id, isRead: false } }),
-    ]);
+    const where = notificationVisibility(req.user.id);
+    const page = await prisma.$transaction(
+      async (tx) => {
+        if (
+          cursor &&
+          !(await tx.notification.findFirst({
+            where: { ...where, id: cursor },
+            select: { id: true },
+          }))
+        )
+          return null;
+        const notifications = await tx.notification.findMany({
+          where,
+          orderBy: [{ date: 'desc' }, { id: 'desc' }],
+          take: limit + 1,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        const unread = await tx.notification.count({ where: { ...where, isRead: false } });
+        return { notifications, unread };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+    if (!page)
+      return res
+        .status(409)
+        .json({ code: 'NOTIFICATIONS_CHANGED', error: 'Список уведомлений обновился.' });
+    const { notifications, unread } = page;
     if (notifications.length > limit) res.setHeader('X-Next-Cursor', notifications[limit - 1].id);
     res.setHeader('X-Unread-Count', String(unread));
     res.json(notifications.slice(0, limit));
@@ -36,7 +55,7 @@ export const markAsRead = async (req: AuthRequest, res: Response) => {
   try {
     // Scope to the owner: a mismatch changes zero rows rather than erroring.
     const { count } = await prisma.notification.updateMany({
-      where: { id, userId: req.user.id },
+      where: { ...notificationVisibility(req.user.id), id },
       data: { isRead: true },
     });
     if (count === 0) return res.status(404).json({ error: 'Notification not found' });

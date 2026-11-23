@@ -24,6 +24,7 @@ export interface Series {
 export interface Catalog {
   practices: Practice[];
   series: Series[];
+  intentions?: Series[];
 }
 
 export interface ReflectionText {
@@ -62,9 +63,13 @@ export interface IncomingShare {
   ownerName: string;
   createdAt: string;
   workCount: number;
+  acknowledgedAt?: string | null;
 }
 
 export interface IncomingShareDetails {
+  acknowledgedAt?: string | null;
+  allowRecommendation?: boolean;
+  recommendedPracticeId?: string | null;
   items: Array<{
     workId: string;
     title: string;
@@ -75,6 +80,9 @@ export interface IncomingShareDetails {
 }
 
 export interface OutgoingShare {
+  acknowledgedAt?: string | null;
+  allowRecommendation?: boolean;
+  recommendedPracticeId?: string | null;
   id: string;
   therapistId: string;
   therapistName: string;

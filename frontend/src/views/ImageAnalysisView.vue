@@ -140,6 +140,7 @@
             @touchstart.prevent="handleTouchStart"
             @touchmove.prevent="handleTouchMove"
             @touchend.prevent="handleTouchEnd"
+            @touchcancel="handleTouchCancel"
             width="600"
             height="400"
             :class="['drawing-canvas', { fullscreen: isCanvasFullscreen }]"
@@ -346,6 +347,7 @@ const {
   handleTouchStart,
   handleTouchMove,
   handleTouchEnd,
+  handleTouchCancel,
   setTool,
   clearCanvasSurface,
 } = useCanvasDrawing();

@@ -128,6 +128,12 @@
           <RouterLink to="/practices" class="btn-primary btn-block"
             >Начать творческую паузу</RouterLink
           >
+          <RouterLink
+            v-if="latestPractice"
+            class="btn-outline"
+            :to="{ name: 'practices', params: { practiceId: latestPractice.practiceId } }"
+            >Продолжить практику</RouterLink
+          >
         </section>
 
         <!-- Recent diary -->
@@ -176,6 +182,7 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from '@/stores/authStore';
+import { useLatestPracticeDraft } from '@/features/practices/useLatestPracticeDraft';
 import { useUserProfileStore } from '@/stores/userProfileStore';
 import Icon from '@/components/Icon.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
@@ -183,6 +190,7 @@ import PeerSupport from '@/components/PeerSupport.vue';
 import EmergencyModal from '@/components/EmergencyModal.vue';
 
 const authStore = useAuthStore();
+const latestPractice = useLatestPracticeDraft();
 const profileStore = useUserProfileStore();
 const { profile } = storeToRefs(profileStore);
 

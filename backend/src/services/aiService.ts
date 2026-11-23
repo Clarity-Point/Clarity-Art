@@ -86,6 +86,7 @@ export class AIService {
           // Without a timeout a stalled provider pins the request, its pooled
           // database connection and an event-loop slot open forever.
           timeout: AI_CHAT_TIMEOUT_MS,
+          maxRedirects: 0,
         },
       );
       return {
@@ -130,6 +131,7 @@ ${text.slice(0, 2_000)}
           // caller must still get its entry written, so fail fast to the
           // heuristic path instead of holding the request open.
           timeout: AI_SCREEN_TIMEOUT_MS,
+          maxRedirects: 0,
         },
       );
       const tagsString = response.data.choices[0].message.content;
@@ -208,6 +210,7 @@ ${text.slice(0, 2_000)}
     try {
       const response = await fetch(`${AI_BASE_URL}/chat/completions`, {
         method: 'POST',
+        redirect: 'error',
         headers: aiHeaders(AI_REFERER_HEADERS),
         body: JSON.stringify({
           model: AI_MODEL,
@@ -273,6 +276,7 @@ ${text.slice(0, 2_000)}
         {
           headers: aiHeaders(AI_REFERER_HEADERS),
           timeout: AI_IMAGE_TIMEOUT_MS,
+          maxRedirects: 0,
           // Vision models are the slowest call in the product and carry a
           // multi-megabyte payload; give them a budget above the default so a
           // healthy large image is not cut off mid-analysis.

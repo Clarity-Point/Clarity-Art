@@ -104,8 +104,13 @@ jobs:
           context: .
           file: ${{ matrix.service }}/Dockerfile
           push: false
+          load: ${{ matrix.service == 'backend' }}
+          tags: clarity-backup-smoke:${{ matrix.service }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: Verify encrypted backup and isolated restore
+        if: matrix.service == 'backend'
+        run: bash tests/tooling/backup-smoke.sh clarity-backup-smoke:backend
 
   browser:
     name: Browser interface checks

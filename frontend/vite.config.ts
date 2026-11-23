@@ -39,7 +39,7 @@ export default defineConfig(({ mode }) => {
         // Cache only build assets. Authenticated API responses can contain diary,
         // chat, health and profile data and must never be persisted by Workbox.
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg,ogg}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpeg,jpg,webp,ogg}'],
           navigateFallback: '/index.html',
         },
       }),
@@ -68,9 +68,6 @@ export default defineConfig(({ mode }) => {
         '/api': { target: proxyTarget, changeOrigin: true },
         '/api-docs': { target: proxyTarget, changeOrigin: true },
       },
-    },
-    build: {
-      target: 'esnext',
     },
   };
 });

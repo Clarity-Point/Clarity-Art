@@ -50,8 +50,8 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await axios.post(`${API_URL}/login`, { email, password });
       if (revision !== sessionRevision.value) return false;
-      // GET /profile is the canonical, complete shape. Hydrating from the small
-      // login response left history, points and progress empty until a reload.
+      // The profile summary contains the current account, points and course progress.
+      // The profile history tab loads chat messages separately.
       return await restoreSession();
     } catch {
       console.error('Login failed:');
@@ -98,7 +98,7 @@ export const useAuthStore = defineStore('auth', () => {
     const revision = sessionRevision.value;
     restorePromise = (async () => {
       try {
-        const response = await axios.get(`${API_URL}/profile`);
+        const response = await axios.get(`${API_URL}/profile`, { params: { view: 'summary' } });
         if (revision !== sessionRevision.value) return false;
         applyProfile(response.data);
         return true;

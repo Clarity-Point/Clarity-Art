@@ -63,6 +63,19 @@ const practices = [
 
 export const practiceCatalog = {
   practices,
+  intentions: [
+    {
+      id: 'free-drawing',
+      title: 'Порисовать без темы',
+      practiceIds: ['two-lines', 'three-shapes'],
+    },
+    { id: 'notice-the-day', title: 'Заметить деталь дня', practiceIds: ['day-frame', 'postcard'] },
+    {
+      id: 'prepare-for-a-meeting',
+      title: 'Подготовиться к встрече',
+      practiceIds: ['postcard', 'three-shapes'],
+    },
+  ],
   series: [
     {
       id: 'line-to-collage',

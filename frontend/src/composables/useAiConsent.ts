@@ -1,52 +1,68 @@
-import { onMounted, ref } from 'vue';
+import { ref, watch } from 'vue';
 import axios from 'axios';
 import { useToastStore } from '@/stores/toastStore';
-
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+import { usePracticeApi } from '@/features/practices/api';
 
 export interface AIStatus {
   configured: boolean;
   processingMode: 'local' | 'external';
   requiresConsent: boolean;
   consentGiven: boolean;
+  policy?: { id: string; label: string } | null;
 }
 
 export function useAiConsent() {
   const status = ref<AIStatus | null>(null);
   const isLoading = ref(true);
   const isSaving = ref(false);
-  const toastStore = useToastStore();
+  const toast = useToastStore();
+  const { auth, capture, isCurrent, request } = usePracticeApi();
 
-  const fetchStatus = async () => {
+  async function fetchStatus() {
+    const session = capture();
+    if (!session.id) return;
     isLoading.value = true;
     try {
-      const response = await axios.get(`${API_URL}/ai/status`);
-      status.value = response.data;
+      status.value = await request<AIStatus>(session, '/ai/status');
     } catch {
-      toastStore.error('Не удалось получить настройки обработки данных AI.');
+      if (isCurrent(session)) toast.error('Не удалось получить настройки обработки данных.');
     } finally {
-      isLoading.value = false;
+      if (isCurrent(session)) isLoading.value = false;
     }
-  };
+  }
 
-  const setConsent = async (consent: boolean) => {
-    if (!status.value || isSaving.value) return;
-    const previous = status.value.consentGiven;
-    status.value.consentGiven = consent;
+  async function setConsent(consent: boolean) {
+    const session = capture();
+    const policy = status.value?.policy;
+    if (!status.value || isSaving.value || (consent && !policy)) return;
     isSaving.value = true;
     try {
-      const response = await axios.put(`${API_URL}/profile/ai-consent`, { consent });
-      status.value.consentGiven = response.data.consentGiven;
-      toastStore.success(consent ? 'Согласие сохранено.' : 'Согласие отозвано.');
-    } catch {
-      status.value.consentGiven = previous;
-      toastStore.error('Не удалось изменить согласие.');
+      const response = await request<{ consentGiven: boolean }>(session, '/profile/ai-consent', {
+        method: 'PUT',
+        data: { consent, policyId: policy?.id },
+      });
+      if (status.value) status.value.consentGiven = response.consentGiven;
+      toast.success(consent ? 'Согласие сохранено.' : 'Согласие отозвано.');
+    } catch (reason) {
+      if (!isCurrent(session)) return;
+      if (axios.isAxiosError(reason) && reason.response?.data?.code === 'AI_POLICY_CHANGED')
+        await fetchStatus();
+      if (isCurrent(session))
+        toast.error('Не удалось изменить согласие. Проверьте текущего поставщика.');
     } finally {
-      isSaving.value = false;
+      if (isCurrent(session)) isSaving.value = false;
     }
-  };
+  }
 
-  onMounted(fetchStatus);
+  watch(
+    () => [auth.user?.id, auth.sessionRevision],
+    () => {
+      status.value = null;
+      isSaving.value = false;
+      void fetchStatus();
+    },
+    { immediate: true, flush: 'sync' },
+  );
   return {
     aiStatus: status,
     isAiStatusLoading: isLoading,

@@ -134,10 +134,12 @@ import axios from 'axios';
 import Icon from '@/components/Icon.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
 import { useToastStore } from '@/stores/toastStore';
+import { usePracticeApi } from '@/features/practices/api';
 
 defineProps<{ drawerOpen: boolean }>();
 const router = useRouter();
 const authStore = useAuthStore();
+const { capture, request } = usePracticeApi();
 const profileStore = useUserProfileStore();
 const { isAuthenticated, user } = storeToRefs(authStore);
 const { profile } = storeToRefs(profileStore);
@@ -150,6 +152,7 @@ interface Notification {
   message: string;
   date: string;
   isRead: boolean;
+  type?: string;
 }
 
 const notifications = ref<Notification[]>([]);
@@ -162,6 +165,7 @@ const notificationsCursor = ref<string | null>(null);
 const notificationsLoading = ref(false);
 const notificationsError = ref('');
 let notificationRequest = 0;
+let refreshAfterRequest = false;
 
 const initials = computed(() => {
   const name = (profile.value.name || '').trim();
@@ -200,33 +204,65 @@ const onEscape = (event: KeyboardEvent) => {
   wrapper?.querySelector('button')?.focus();
 };
 
-const fetchNotifications = async (more = false) => {
+const fetchNotifications = async (more = false, keepWindow = false) => {
   if (!isAuthenticated.value || notificationsLoading.value) return;
   const revision = authStore.sessionRevision;
   const current = ++notificationRequest;
   notificationsLoading.value = true;
   notificationsError.value = '';
   try {
-    const res = await axios.get(`${API_URL}/notifications`, {
-      params: more ? { cursor: notificationsCursor.value } : {},
-    });
-    if (revision !== authStore.sessionRevision || current !== notificationRequest) return;
-    const rows: Notification[] = Array.isArray(res.data) ? res.data : [];
-    notifications.value = more
-      ? [
-          ...notifications.value,
-          ...rows.filter((row) => !notifications.value.some((item) => item.id === row.id)),
-        ]
-      : rows;
-    notificationsCursor.value = res.headers['x-next-cursor'] || null;
-    unreadCount.value = Number(
-      res.headers['x-unread-count'] ?? rows.filter((row) => !row.isRead).length,
-    );
-  } catch {
-    if (revision === authStore.sessionRevision && current === notificationRequest)
-      notificationsError.value = 'Не удалось загрузить уведомления.';
+    const expectedUserId = user.value?.id;
+    const total = keepWindow ? notifications.value.length : 0;
+    const collected = new Map<string, Notification>();
+    const seenCursors = new Set<string>();
+    let cursor = more ? notificationsCursor.value : null;
+    let unread: string | undefined;
+    if (more)
+      for (const notification of notifications.value) collected.set(notification.id, notification);
+    do {
+      const res = await axios.get(`${API_URL}/notifications`, {
+        params: {
+          cursor: cursor ?? undefined,
+          limit: total ? Math.min(100, Math.max(total, 50)) : undefined,
+        },
+        headers: { 'X-Expected-User-Id': expectedUserId },
+      });
+      if (revision !== authStore.sessionRevision || current !== notificationRequest) return;
+      const rows: Notification[] = Array.isArray(res.data) ? res.data : [];
+      for (const row of rows) collected.set(row.id, row);
+      unread = res.headers['x-unread-count'];
+      cursor = res.headers['x-next-cursor'] || null;
+      if (cursor && seenCursors.has(cursor)) {
+        cursor = null;
+        break;
+      }
+      if (cursor) seenCursors.add(cursor);
+    } while (keepWindow && cursor && collected.size < total);
+    notifications.value = Array.from(collected.values());
+    notificationsCursor.value = cursor;
+    unreadCount.value = Number(unread ?? notifications.value.filter((row) => !row.isRead).length);
+  } catch (reason) {
+    if (revision === authStore.sessionRevision && current === notificationRequest) {
+      if (axios.isAxiosError(reason) && reason.response?.data?.code === 'SESSION_CHANGED') {
+        authStore.expireSession();
+        void authStore.restoreSession();
+      } else if (
+        (more || keepWindow) &&
+        axios.isAxiosError(reason) &&
+        reason.response?.data?.code === 'NOTIFICATIONS_CHANGED'
+      ) {
+        notificationsLoading.value = false;
+        void fetchNotifications();
+      } else notificationsError.value = 'Не удалось загрузить уведомления.';
+    }
   } finally {
-    if (current === notificationRequest) notificationsLoading.value = false;
+    if (current === notificationRequest) {
+      notificationsLoading.value = false;
+      if (refreshAfterRequest) {
+        refreshAfterRequest = false;
+        refreshVisibleNotifications();
+      }
+    }
   }
 };
 
@@ -234,6 +270,7 @@ watch(
   () => [authStore.sessionRevision, user.value?.id],
   (current, previous) => {
     notificationRequest++;
+    refreshAfterRequest = false;
     notifications.value = [];
     unreadCount.value = 0;
     notificationsCursor.value = null;
@@ -251,18 +288,45 @@ watch(
 const readNoti = async (id: string) => {
   const revision = authStore.sessionRevision;
   try {
-    await axios.put(`${API_URL}/notifications/${id}/read`);
+    await request(capture(), `/notifications/${id}/read`, { method: 'PUT' });
     if (revision !== authStore.sessionRevision) return;
     const noti = notifications.value.find((n) => n.id === id);
     if (noti && !noti.isRead) {
       noti.isRead = true;
       unreadCount.value = Math.max(0, unreadCount.value - 1);
     }
-  } catch {
+    const destination =
+      noti?.type === 'practice_share'
+        ? '/therapist/practice-shares'
+        : noti?.type === 'practice_recommendation'
+          ? '/practice-album'
+          : undefined;
+    if (destination) {
+      showNotifications.value = false;
+      await router.push(destination);
+    }
+  } catch (reason) {
+    if (
+      revision === authStore.sessionRevision &&
+      axios.isAxiosError(reason) &&
+      reason.response?.status === 404
+    ) {
+      void fetchNotifications();
+      return;
+    }
     if (revision === authStore.sessionRevision)
       useToastStore().error('Не удалось отметить уведомление прочитанным.');
   }
 };
+
+function refreshVisibleNotifications() {
+  if (document.hidden) return;
+  if (notificationsLoading.value) refreshAfterRequest = true;
+  else void fetchNotifications(false, showNotifications.value);
+}
+function refreshNotificationsOnFocus() {
+  if (showNotifications.value) refreshVisibleNotifications();
+}
 
 const isDark = ref(false);
 
@@ -280,6 +344,8 @@ const toggleTheme = () => {
 let pollId: number | undefined;
 
 onMounted(() => {
+  window.addEventListener('focus', refreshNotificationsOnFocus);
+  document.addEventListener('visibilitychange', refreshVisibleNotifications);
   // Light-first: only go dark when the user has explicitly chosen it before.
   const savedTheme = localStorage.getItem('theme');
   if (savedTheme === 'dark') {
@@ -287,13 +353,15 @@ onMounted(() => {
     document.documentElement.setAttribute('data-theme', 'dark');
   }
   pollId = window.setInterval(() => {
-    if (!showNotifications.value) void fetchNotifications();
+    if (!showNotifications.value && !document.hidden) void fetchNotifications();
   }, 60000);
   document.addEventListener('click', onClickOutside);
   document.addEventListener('keydown', onEscape);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshNotificationsOnFocus);
+  document.removeEventListener('visibilitychange', refreshVisibleNotifications);
   notificationRequest++;
   if (pollId) clearInterval(pollId);
   document.removeEventListener('click', onClickOutside);

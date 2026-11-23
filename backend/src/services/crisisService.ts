@@ -57,7 +57,7 @@ export const analyzeCrisisRisk = async (
         ],
         temperature: 0,
       },
-      { headers: aiHeaders(), timeout: AI_SCREEN_TIMEOUT_MS },
+      { headers: aiHeaders(), timeout: AI_SCREEN_TIMEOUT_MS, maxRedirects: 0 },
     );
 
     const result = String(response.data?.choices?.[0]?.message?.content || '')

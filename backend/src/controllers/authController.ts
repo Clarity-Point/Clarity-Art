@@ -14,9 +14,16 @@ import { JWT_SECRET } from '../config/secrets';
 import { AIService } from '../services/aiService';
 import { createLogger } from '../config/logger';
 import { recordAudit } from '../services/auditService';
-import { AI_DATA_PROCESSING_MODE, AI_ENABLED, AI_REQUIRES_CONSENT } from '../config/ai';
+import {
+  AI_DATA_PROCESSING_MODE,
+  AI_ENABLED,
+  AI_CONSENT_POLICY,
+  AI_REQUIRES_CONSENT,
+} from '../config/ai';
 import { processImageDeletions } from '../services/imageDeletionService';
-import { canUseConfiguredAI } from '../services/aiConsentService';
+import { canUseConfiguredAI, hasCurrentAIConsent } from '../services/aiConsentService';
+import { nonemptyPracticeDraft } from '../services/practiceStorage';
+import { notificationVisibility } from '../services/practiceNotifications';
 
 const log = createLogger('authController');
 
@@ -153,21 +160,59 @@ export const logout = async (_req: AuthRequest, res: Response) => {
   res.status(204).end();
 };
 
+const profileChatQuery = {
+  orderBy: { date: 'desc' as const },
+  take: 31,
+  select: {
+    messages: {
+      orderBy: { createdAt: 'desc' as const },
+      take: 100,
+      select: { content: true, role: true, createdAt: true },
+    },
+  },
+};
+type ProfileChat = { messages: Array<{ content: string; role: string; createdAt: Date }> };
+
+function profileChatHistory(chats: ProfileChat[]) {
+  return {
+    truncated: chats.length > 30,
+    sessions: chats.slice(0, 30).map(({ messages }) =>
+      messages
+        .slice()
+        .reverse()
+        .map((message) => ({
+          text: message.content,
+          sender: message.role === 'assistant' ? 'ИИ' : 'user',
+          timestamp: message.createdAt,
+        })),
+    ),
+  };
+}
+
+function getRecentProfileChats(userId: string) {
+  return prisma.chatSession.findMany({ where: { userId }, ...profileChatQuery });
+}
+
+export const getProfileChatHistory = async (req: AuthRequest, res: Response) => {
+  res.json(profileChatHistory(await getRecentProfileChats(req.user!.id)));
+};
+
 export const getProfile = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
 
+  const summary = req.query.view === 'summary';
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
         profile: true,
         courseProgress: {
-          include: { course: true },
+          include: { course: { select: { slug: true, title: true } } },
         },
         submissions: {
           orderBy: { submissionDate: 'desc' },
           take: 101,
-          include: { homework: true },
+          include: { homework: { select: { title: true } } },
         },
         diaryEntries: {
           orderBy: { date: 'desc' },
@@ -180,21 +225,20 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
           orderBy: { date: 'desc' },
           take: 51,
         },
-        chatSessions: {
-          orderBy: { date: 'desc' },
-          take: 31,
-          include: { messages: { orderBy: { createdAt: 'desc' }, take: 101 } },
-        },
       },
     });
 
     if (!user || !user.profile) return res.status(404).json({ error: 'Profile not found' });
 
     // All achievements, flagged with whether this user has earned them (locked ones show greyed-out).
-    const allAchievements = await prisma.achievement.findMany();
+    const [allAchievements, sessions] = await Promise.all([
+      prisma.achievement.findMany(),
+      summary ? [] : getRecentProfileChats(user.id),
+    ]);
     const earnedMap = new Map(user.achievements.map((ua) => [ua.achievementId, ua.earnedAt]));
     const { id: _profileId, ...profileData } = user.profile;
 
+    const chats = profileChatHistory(sessions);
     res.json({
       ...profileData,
       id: user.id,
@@ -208,7 +252,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       dataTruncated: {
         diary: user.diaryEntries.length > 100,
         images: user.imageAnalyses.length > 50,
-        chats: user.chatSessions.length > 30,
+        chats: chats.truncated,
         homework: user.submissions.length > 100,
       },
       courseProgress: user.courseProgress.map((cp) => ({
@@ -256,16 +300,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
         extendedQuestions: ia.extendedQuestions || undefined,
         extendedAnalysisText: ia.extendedAnalysisText || undefined,
       })),
-      chatSessions: user.chatSessions.slice(0, 30).map((cs) =>
-        cs.messages
-          .reverse()
-          .slice(-100)
-          .map((m) => ({
-            text: m.content,
-            sender: m.role === 'assistant' ? 'ИИ' : 'user',
-            timestamp: m.createdAt,
-          })),
-      ),
+      chatSessions: chats.sessions,
     });
   } catch (error) {
     log.error({ err: error }, 'Error fetching profile');
@@ -343,13 +378,14 @@ export const getAIStatus = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   const profile = await prisma.profile.findUnique({
     where: { userId: req.user.id },
-    select: { aiDataConsentAt: true },
+    select: { aiDataConsentAt: true, aiDataConsentPolicyId: true },
   });
   res.json({
     configured: AI_ENABLED,
     processingMode: AI_DATA_PROCESSING_MODE,
     requiresConsent: AI_REQUIRES_CONSENT,
-    consentGiven: Boolean(profile?.aiDataConsentAt),
+    consentGiven: hasCurrentAIConsent(profile),
+    policy: AI_CONSENT_POLICY,
   });
 };
 
@@ -359,10 +395,18 @@ export const updateAIConsent = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'consent must be a boolean' });
   }
   const granted = req.body.consent;
+  if (granted && (!AI_CONSENT_POLICY || req.body.policyId !== AI_CONSENT_POLICY.id))
+    return res.status(409).json({
+      code: 'AI_POLICY_CHANGED',
+      error: 'Настройки обработки изменились. Откройте их заново.',
+    });
   const profile = await prisma.profile.update({
     where: { userId: req.user.id },
-    data: { aiDataConsentAt: granted ? new Date() : null },
-    select: { aiDataConsentAt: true },
+    data: {
+      aiDataConsentAt: granted ? new Date() : null,
+      aiDataConsentPolicyId: granted ? AI_CONSENT_POLICY?.id : null,
+    },
+    select: { aiDataConsentAt: true, aiDataConsentPolicyId: true },
   });
   recordAudit({
     action: granted ? 'consent.ai_granted' : 'consent.ai_revoked',
@@ -372,7 +416,7 @@ export const updateAIConsent = async (req: AuthRequest, res: Response) => {
     ip: auditIp(req),
     meta: { processingMode: AI_DATA_PROCESSING_MODE },
   });
-  res.json({ consentGiven: Boolean(profile.aiDataConsentAt) });
+  res.json({ consentGiven: hasCurrentAIConsent(profile) });
 };
 
 export const changePassword = async (req: AuthRequest, res: Response) => {
@@ -504,9 +548,10 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
       imageAnalyses: true,
       chatSessions: { include: { messages: true } },
       challenges: { include: { challenge: true } },
-      notifications: true,
+      notifications: { where: notificationVisibility(req.user.id) },
       drafts: true,
       moodCheckIns: true,
+      practiceDrafts: { where: nonemptyPracticeDraft },
       practiceWorks: { include: { reflections: true } },
       practiceCompletions: { select: { practiceId: true, completedAt: true } },
       practiceShares: {
@@ -514,6 +559,8 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
         select: {
           id: true,
           therapistId: true,
+          acknowledgedAt: true,
+          allowRecommendation: true,
           createdAt: true,
           items: {
             orderBy: { position: 'asc' },
@@ -543,7 +590,13 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
     },
   });
   if (!user) return res.status(404).json({ error: 'Account not found' });
-  const { password: _password, sessionVersion: _sessionVersion, practiceWorks, ...safeData } = user;
+  const {
+    password: _password,
+    sessionVersion: _sessionVersion,
+    practiceWorks,
+    practiceDrafts,
+    ...safeData
+  } = user;
   recordAudit({
     action: 'account.exported',
     actorId: req.user.id,
@@ -561,6 +614,14 @@ export const exportAccountData = async (req: AuthRequest, res: Response) => {
     exportedAt: new Date().toISOString(),
     user: {
       ...safeData,
+      practiceDrafts: practiceDrafts.map(
+        ({ image, imageMimeType, mutationId: _mutationId, ...draft }) => ({
+          ...draft,
+          image: image
+            ? { mimeType: imageMimeType, base64: Buffer.from(image).toString('base64') }
+            : null,
+        }),
+      ),
       practiceWorks: practiceWorks.map(({ image, imageMimeType, ...work }) => ({
         ...work,
         image: image

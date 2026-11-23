@@ -82,6 +82,12 @@ const router = createRouter({
       meta: { title: 'Мой альбом' },
     },
     {
+      path: '/practice-demo',
+      name: 'practice-demo',
+      component: () => import('../views/PracticeDemoView.vue'),
+      meta: { public: true, title: 'Две линии' },
+    },
+    {
       path: '/practice-cards/:practiceId?',
       name: 'practice-cards',
       component: () => import('../views/PracticeCardsView.vue'),

@@ -19,11 +19,17 @@ const { auth, capture, isCurrent, request } = usePracticeApi();
 const ownerId = auth.user?.id;
 const specialists = ref<Specialist[]>();
 const recipient = ref('');
+const allowRecommendation = ref(false);
 const selection = ref<Record<string, ShareChoice>>({});
 const error = ref('');
 const busy = ref(false);
 const uncertain = ref(false);
-const preview = ref<{ id: string; therapistId: string; items: ShareChoice[] }>();
+const preview = ref<{
+  id: string;
+  therapistId: string;
+  allowRecommendation: boolean;
+  items: ShareChoice[];
+}>();
 const previewHeading = ref<HTMLElement>();
 const selectHeading = ref<HTMLElement>();
 defineExpose({ focus: () => selectHeading.value?.focus() });
@@ -84,6 +90,7 @@ async function showPreview() {
   preview.value = {
     id: newRequestId(),
     therapistId: recipient.value,
+    allowRecommendation: allowRecommendation.value,
     items: items.map((item) => ({ ...item, reflectionIds: [...item.reflectionIds] })),
   };
   await nextTick();
@@ -147,6 +154,7 @@ async function send() {
           </template>
         </article>
       </div>
+      <p v-if="preview.allowRecommendation">Специалист сможет предложить одну практику.</p>
       <p class="muted">Доступ к подборке можно отозвать в альбоме.</p>
       <div class="share-actions">
         <button type="button" class="btn-primary" :disabled="busy" @click="send">
@@ -185,6 +193,9 @@ async function send() {
         Повторить загрузку
       </button>
 
+      <label class="share-recommendation">
+        <input v-model="allowRecommendation" type="checkbox" /> Разрешить предложить практику
+      </label>
       <fieldset class="share-works">
         <legend>Работы для встречи ({{ chosen.length }} из 8)</legend>
         <div v-for="work in works" :key="work.id" class="work-selection">
@@ -227,6 +238,11 @@ async function send() {
 </template>
 
 <style scoped>
+.share-recommendation {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
 .share-composer {
   min-inline-size: 0;
   overflow-wrap: anywhere;

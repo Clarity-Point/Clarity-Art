@@ -70,7 +70,14 @@
         </form>
 
         <p class="auth-switch muted">
-          Уже есть аккаунт? <router-link to="/login">Войти</router-link>
+          Уже есть аккаунт?
+          <router-link
+            :to="{
+              name: 'login',
+              query: route.query.redirect ? { redirect: route.query.redirect } : {},
+            }"
+            >Войти</router-link
+          >
         </p>
       </div>
     </div>
@@ -80,12 +87,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useAuthStore } from '../stores/authStore';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import Icon from '@/components/Icon.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
 
 const authStore = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const name = ref('');
 const email = ref('');
@@ -98,7 +106,8 @@ async function handleRegister() {
   error.value = '';
   const success = await authStore.register(email.value, password.value, name.value);
   if (success) {
-    router.push('/');
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
+    router.replace(redirect);
   } else {
     error.value = 'Регистрация не удалась. Возможно, email уже занят.';
   }

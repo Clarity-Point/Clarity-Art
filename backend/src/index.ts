@@ -8,6 +8,7 @@ import {
   login,
   logout,
   getProfile,
+  getProfileChatHistory,
   updateProfile,
   generateProfileAnalysis,
   getAIStatus,
@@ -87,6 +88,7 @@ import {
   isOrgAdmin,
   isTherapist,
   requireAIConsent,
+  requireAccountContext,
   requireExpectedUser,
 } from './middleware/auth';
 import { updateStreak } from './middleware/gamification';
@@ -101,7 +103,11 @@ import { processImageDeletions } from './services/imageDeletionService';
 import { getDraft, saveDraft } from './controllers/draftController';
 import { requestPasswordReset, resetPassword } from './controllers/passwordResetController';
 import { getHistory } from './controllers/historyController';
-import { practiceRouter, therapistPracticeRouter } from './routes/practiceRoutes';
+import {
+  practiceDraftWriteRouter,
+  practiceRouter,
+  therapistPracticeRouter,
+} from './routes/practiceRoutes';
 import {
   listMoodCheckIns,
   saveMoodCheckIn,
@@ -159,6 +165,7 @@ const corsOptions = {
     'X-Total-Count',
     'X-Pending-Count',
     'X-Attention-Count',
+    'Retry-After',
   ],
   credentials: true,
 };
@@ -212,6 +219,7 @@ app.use('/api/', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
+app.use('/api/practices/drafts', practiceDraftWriteRouter);
 app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 
@@ -268,7 +276,13 @@ app.put('/api/admin/lessons/:id', authenticateToken, isAdmin, updateLesson);
 app.post('/api/register', authLimiter, register);
 app.post('/api/login', authLimiter, login);
 app.post('/api/logout', logout);
-app.get('/api/profile', authenticateToken, updateStreak, getProfile);
+app.get('/api/profile', authenticateToken, requireExpectedUser, updateStreak, getProfile);
+app.get(
+  '/api/profile/chat-history',
+  authenticateToken,
+  requireAccountContext,
+  getProfileChatHistory,
+);
 app.put('/api/profile', authenticateToken, updateStreak, updateProfile);
 app.put('/api/account/password', authenticateToken, changePassword);
 app.post('/api/account/logout-all', authenticateToken, logoutAll);
@@ -280,8 +294,8 @@ app.post(
   aiLimiter,
   generateProfileAnalysis,
 );
-app.get('/api/ai/status', authenticateToken, getAIStatus);
-app.put('/api/profile/ai-consent', authenticateToken, updateAIConsent);
+app.get('/api/ai/status', authenticateToken, requireExpectedUser, getAIStatus);
+app.put('/api/profile/ai-consent', authenticateToken, requireAccountContext, updateAIConsent);
 
 // B2B Org
 app.post('/api/org/transfer-admin', authenticateToken, isOrgAdmin, authLimiter, transferOrgAdmin);
@@ -357,8 +371,8 @@ app.get(
 );
 
 // Notifications
-app.get('/api/notifications', authenticateToken, getNotifications);
-app.put('/api/notifications/:id/read', authenticateToken, markAsRead);
+app.get('/api/notifications', authenticateToken, requireExpectedUser, getNotifications);
+app.put('/api/notifications/:id/read', authenticateToken, requireExpectedUser, markAsRead);
 
 // Admin Routes
 app.get('/api/admin/stats', authenticateToken, isAdmin, getStats);

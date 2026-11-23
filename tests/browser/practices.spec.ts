@@ -11,7 +11,7 @@ const thumbnail =
 
 test('a guest can browse and print the whole A4 deck or a single card', async ({ page }) => {
   let authRequest = false;
-  await page.route('**/api/profile', (route) => {
+  await page.route(/\/api\/profile(?:\?[^/]*)?$/, (route) => {
     authRequest = true;
     return route.fulfill({ status: 401, json: {} });
   });
@@ -61,6 +61,8 @@ test('complete a series step, download a drawing and share only the selected alb
   let work: AlbumWork | undefined;
   let shared: { id: string; items: unknown[] } | undefined;
   let providerCalls = 0;
+  const emptyDraft = { title: '', note: '', mode: 'paper', attachmentKind: null, image: null };
+  let draft = { version: 0, mutationId: null, snapshot: emptyDraft };
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -78,21 +80,41 @@ test('complete a series step, download a drawing and share only the selected alb
       if (!practiceProgress.includes(id)) practiceProgress.push(id);
       return route.fulfill({ status: 204 });
     }
-    if (path === '/api/practices/works') {
-      if (req.method() === 'GET') return route.fulfill({ json: work ? [work] : [] });
+    if (path === '/api/practices/drafts') {
+      return route.fulfill({
+        json:
+          draft.snapshot.note || draft.snapshot.image
+            ? [{ practiceId: 'two-lines', updatedAt: date }]
+            : [],
+      });
+    }
+    if (path === '/api/practices/drafts/two-lines') {
+      if (req.method() === 'GET') return route.fulfill({ json: draft });
       const data = req.postDataJSON();
-      expect(data.image.mimeType).toBe('image/png');
-      expect(data.practiceId).toBe('two-lines');
+      expect(data.version).toBe(draft.version);
+      draft = {
+        version: data.version + 1,
+        mutationId: data.mutationId,
+        snapshot: data.snapshot || emptyDraft,
+      };
+      return route.fulfill({ json: { version: draft.version } });
+    }
+    if (path === '/api/practices/drafts/two-lines/finalize') {
+      const data = req.postDataJSON();
+      expect(data.version).toBe(draft.version);
+      expect(draft.snapshot.image).toMatchObject({ mimeType: 'image/png' });
       work = {
         id: data.id,
-        title: data.title,
-        note: data.note,
+        title: draft.snapshot.title,
+        note: draft.snapshot.note,
         hasImage: true,
         createdAt: date,
         reflections: [],
       };
+      draft = { version: draft.version + 1, mutationId: null, snapshot: emptyDraft };
       return route.fulfill({ status: 201, json: work });
     }
+    if (path === '/api/practices/works') return route.fulfill({ json: work ? [work] : [] });
     if (path.endsWith('/image') && path.startsWith('/api/practices/works/'))
       return route.fulfill({ body: Buffer.from(thumbnail, 'base64'), contentType: 'image/png' });
     if (path.endsWith('/reflections')) {
@@ -159,6 +181,22 @@ test('complete a series step, download a drawing and share only the selected alb
 
   await page.getByText('Сохранить рисунок или заметку', { exact: true }).click();
   await page.getByLabel('Подпись к работе').fill('Личная исходная подпись');
+  await expect(page.getByText('Черновик сохранён', { exact: true })).toBeVisible({
+    timeout: 25000,
+  });
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Продолжить практику' }).click();
+  await expect(page.getByRole('radio', { name: 'На холсте' })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Скачать рисунок' })).toBeEnabled();
+  const existingDrawing = await page
+    .locator('canvas')
+    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.locator('canvas').click({ position: { x: 120, y: 35 } });
+  await expect
+    .poll(() => page.locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
+    .not.toBe(existingDrawing);
+  await page.getByText('Сохранить рисунок или заметку', { exact: true }).click();
+  await expect(page.getByLabel('Подпись к работе')).toHaveValue('Личная исходная подпись');
   await page.getByRole('button', { name: 'Сохранить работу' }).click();
   await page.getByRole('link', { name: 'Открыть альбом' }).click();
   await expect(page.getByText('Личная исходная подпись', { exact: false })).toBeVisible();
@@ -195,6 +233,8 @@ test('complete a series step, download a drawing and share only the selected alb
 
 test('the specialist rechecks a selection before opening it and on tab focus', async ({ page }) => {
   let available = true;
+  let acknowledged = false;
+  let recommended = false;
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/profile')
@@ -217,11 +257,24 @@ test('the specialist rechecks a selection before opening it and on tab focus', a
         },
       });
     }
+    if (path.endsWith('/meeting-one/acknowledgement')) {
+      acknowledged = true;
+      return route.fulfill({ json: { acknowledgedAt: date } });
+    }
+    if (path.endsWith('/meeting-one/recommendation')) {
+      expect(route.request().postDataJSON()).toEqual({ practiceId: 'two-lines' });
+      recommended = true;
+      return route.fulfill({ json: { practiceId: 'two-lines' } });
+    }
+    if (path === '/api/practices/catalog') return route.fulfill({ json: practiceCatalog });
     if (path === '/api/therapist/practice-shares/meeting-one') {
       expect(route.request().headers()['x-expected-user-id']).toBe(therapistId);
       if (!available) return route.fulfill({ status: 404, json: {} });
       return route.fulfill({
         json: {
+          acknowledgedAt: acknowledged ? date : null,
+          allowRecommendation: true,
+          recommendedPracticeId: recommended ? 'two-lines' : null,
           items: [
             {
               workId: 'drawing-1',
@@ -247,6 +300,11 @@ test('the specialist rechecks a selection before opening it and on tab focus', a
   await page.getByRole('button', { name: 'Обновить подборки' }).click();
   await page.getByRole('button', { name: /Автор/ }).click();
   await expect(page.getByText('Выбранная подпись')).toBeVisible();
+  await page.getByRole('button', { name: 'Отметить как просмотренную' }).click();
+  await expect(page.getByText('Подборка отмечена как просмотренная.')).toBeVisible();
+  await page.getByLabel('Практика к следующей встрече').selectOption('two-lines');
+  await page.getByRole('button', { name: 'Предложить практику' }).click();
+  await expect(page.getByText('Практика предложена.')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   available = false;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -287,4 +345,171 @@ test('a background album clears the previous account when it receives focus', as
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(page.getByText('Приватная подпись первого аккаунта')).toHaveCount(0);
   await expect(page.getByText('Здесь появятся ваши рисунки и заметки.')).toBeVisible();
+});
+
+test('a guest draws and downloads ink without sending a drawing or requesting an account', async ({
+  page,
+}) => {
+  const requests: string[] = [];
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    requests.push(path);
+    return route.fulfill({ json: path === '/api/practices/catalog' ? practiceCatalog : {} });
+  });
+  await page.goto('/practice-demo');
+  const canvas = page.locator('canvas');
+  await canvas.click({ position: { x: 50, y: 55 } });
+  const hasInk = await canvas.evaluate((element: HTMLCanvasElement) =>
+    [...element.getContext('2d')!.getImageData(0, 0, element.width, element.height).data].some(
+      (value, index) => index % 4 !== 3 && value < 100,
+    ),
+  );
+  expect(hasInk).toBe(true);
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Скачать рисунок' }).click();
+  expect((await downloaded).suggestedFilename()).toBe('two-lines.png');
+  expect(requests).toEqual(['/api/practices/catalog']);
+});
+
+test('the catalog restores the selected intention from an exercise link', async ({ page }) => {
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const json =
+      path === '/api/profile'
+        ? { id: userId, role: 'USER' }
+        : path === '/api/practices/catalog'
+          ? practiceCatalog
+          : path === '/api/practices/drafts/day-frame'
+            ? {
+                version: 0,
+                mutationId: null,
+                snapshot: { title: '', note: '', mode: 'paper', attachmentKind: null, image: null },
+              }
+            : [];
+    return route.fulfill({ json });
+  });
+  await page.goto('/practices');
+  await page.getByLabel('Чего хочется сейчас').selectOption('notice-the-day');
+  const list = page.getByRole('region', { name: 'Одно упражнение' });
+  await expect(list.getByRole('link')).toHaveCount(2);
+  await list.getByRole('link', { name: /Кадр из дня/ }).click();
+  await page.getByRole('link', { name: 'Все практики' }).click();
+  await expect(page.getByLabel('Чего хочется сейчас')).toHaveValue('notice-the-day');
+  await page.getByLabel('Материалы').selectOption('collage');
+  await expect(page.getByRole('button', { name: 'Сбросить фильтры' })).toBeVisible();
+});
+
+test('guest strokes preserve other ink on erasure and encode only on download', async ({
+  page,
+}) => {
+  await page.route('**/api/practices/catalog', (route) => route.fulfill({ json: practiceCatalog }));
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toDataURL;
+    const counts = { png: 0 };
+    Object.defineProperty(window, 'testDrawingCounts', { value: counts });
+    HTMLCanvasElement.prototype.toDataURL = function (...args) {
+      counts.png++;
+      return encode.apply(this, args);
+    };
+  });
+  await page.goto('/practice-demo');
+  const canvas = page.locator('canvas');
+  const first = { x: 36, y: 30 };
+  const second = { x: 76, y: 70 };
+  await canvas.click({ position: first });
+  await canvas.click({ position: second });
+  const download = page.getByRole('button', { name: 'Скачать рисунок' });
+  await expect(download).toBeEnabled();
+  await page.getByRole('button', { name: 'Ластик' }).click();
+  await canvas.click({ position: first });
+  await expect(download).toBeEnabled();
+  await canvas.click({ position: second });
+  await expect(download).toBeDisabled();
+  await page.getByRole('button', { name: 'Кисть' }).click();
+  await page.locator('input[type=color]').fill('#ffffff');
+  await canvas.click({ position: second });
+  await expect(download).toBeDisabled();
+  await page.locator('input[type=color]').fill('#000000');
+  await canvas.click({ position: first });
+  const counts = () => page.evaluate(() => Reflect.get(window, 'testDrawingCounts').png as number);
+  expect(await counts()).toBe(0);
+  const event = page.waitForEvent('download');
+  await download.click();
+  await event;
+  expect(await counts()).toBe(1);
+});
+
+test('a failed PNG encode keeps the pending canvas and retries without erasing it', async ({
+  page,
+}) => {
+  let writes = 0;
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toDataURL;
+    let first = true;
+    HTMLCanvasElement.prototype.toDataURL = function (...args) {
+      if (first) {
+        first = false;
+        return 'data:,';
+      }
+      return encode.apply(this, args);
+    };
+  });
+  await page.route('**/api/**', (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/profile') return route.fulfill({ json: { id: userId, role: 'USER' } });
+    if (path === '/api/practices/catalog') return route.fulfill({ json: practiceCatalog });
+    if (path === '/api/practices/drafts/two-lines') {
+      if (request.method() === 'PUT') {
+        writes++;
+        expect(request.postDataJSON().snapshot).toMatchObject({
+          attachmentKind: 'canvas',
+          image: { mimeType: 'image/png', base64: expect.any(String) },
+        });
+        return route.fulfill({ json: { version: 1 } });
+      }
+      return route.fulfill({
+        json: {
+          version: 0,
+          mutationId: null,
+          snapshot: { title: '', note: '', mode: 'paper', attachmentKind: null, image: null },
+        },
+      });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.goto('/practices/two-lines');
+  await page.getByRole('radio', { name: 'На холсте' }).check();
+  await page.locator('canvas').click({ position: { x: 25, y: 40 } });
+  await expect(page.getByRole('alert')).toContainText('Не удалось подготовить рисунок');
+  expect(writes).toBe(0);
+  await page.getByRole('button', { name: 'Повторить автосохранение' }).click();
+  await expect(page.getByText('Черновик сохранён', { exact: true })).toBeVisible();
+  expect(writes).toBe(1);
+});
+
+test('secondary touches do not reset the active stroke or the remaining ink', async ({ page }) => {
+  await page.route('**/api/practices/catalog', (route) => route.fulfill({ json: practiceCatalog }));
+  await page.goto('/practice-demo');
+  const canvas = page.locator('canvas');
+  await canvas.evaluate((element: HTMLCanvasElement) => {
+    const bounds = element.getBoundingClientRect();
+    const touch = (identifier: number, x: number, y: number) =>
+      new Touch({ identifier, target: element, clientX: bounds.left + x, clientY: bounds.top + y });
+    const send = (type: string, touches: Touch[], changedTouches: Touch[]) =>
+      element.dispatchEvent(new TouchEvent(type, { touches, changedTouches, bubbles: true }));
+    const firstStart = touch(1, 35, 40);
+    const firstEnd = touch(1, 130, 40);
+    const second = touch(2, 165, 65);
+    send('touchstart', [firstStart], [firstStart]);
+    send('touchmove', [firstEnd], [firstEnd]);
+    send('touchstart', [firstEnd, second], [second]);
+    send('touchend', [firstEnd], [second]);
+    send('touchend', [], [firstEnd]);
+  });
+  const download = page.getByRole('button', { name: 'Скачать рисунок' });
+  await expect(download).toBeEnabled();
+  await page.getByRole('button', { name: 'Ластик' }).click();
+  await canvas.click({ position: { x: 130, y: 40 } });
+  await expect(download).toBeEnabled();
 });

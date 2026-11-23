@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
-import { useCanvasDrawing } from '@/composables/useCanvasDrawing';
 import Icon from '@/components/Icon.vue';
-import SaveWorkForm from './SaveWorkForm.vue';
-import { asDrawing, practiceError, usePracticeApi, type Practice } from './api';
+import PracticeCanvas from './PracticeCanvas.vue';
+import { usePracticeDraft } from './usePracticeDraft';
+import {
+  captionLimit,
+  practiceError,
+  preparePaperPhoto,
+  usePracticeApi,
+  type Practice,
+} from './api';
 
 const props = defineProps<{
   practice: Practice;
@@ -14,63 +20,108 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ completed: [practiceId: string] }>();
 const { capture, isCurrent, request } = usePracticeApi();
-const mode = ref<'paper' | 'canvas'>('paper');
-const workForm = ref<InstanceType<typeof SaveWorkForm>>();
+const canvas = ref<InstanceType<typeof PracticeCanvas>>();
+const prefix = useId();
 const busy = ref(false);
 const status = ref('');
 const workSaved = ref(false);
 const error = ref('');
-const drawingRevision = ref(0);
-const savedRevision = ref(0);
-const {
-  drawingCanvasRef,
-  currentColor,
-  currentTool,
-  isCanvasEmpty,
-  setTool,
-  handleMouseDown,
-  handleMouseMove,
-  handleMouseUp,
-  handleMouseLeave,
-  handleTouchStart,
-  handleTouchMove,
-  handleTouchEnd,
-  clearCanvasSurface,
-} = useCanvasDrawing({
-  tapToFullscreen: false,
-  onChange: () => {
-    drawingRevision.value++;
-  },
-});
-const dirty = computed(
-  () =>
-    Boolean(workForm.value?.dirty) ||
-    (drawingRevision.value !== savedRevision.value && !isCanvasEmpty.value),
-);
+const photoError = ref('');
+const photoBusy = ref(false);
 let disposed = false;
+const {
+  snapshot,
+  ready,
+  syncing,
+  committed,
+  finalizing,
+  dirty,
+  error: draftError,
+  attachmentError,
+  conflict,
+  finalAttempt,
+  edit,
+  flush,
+  finish,
+  discard,
+  load,
+} = usePracticeDraft(
+  props.practice.id,
+  props.practice.title,
+  async (image, signal) => {
+    await canvas.value?.restore(image, signal);
+  },
+  () => canvas.value?.readDrawing(),
+);
+const locked = computed(
+  () => !ready.value || finalizing.value || Boolean(finalAttempt.value) || photoBusy.value,
+);
+const mode = computed({
+  get: () => snapshot.value.mode,
+  set: (value: 'paper' | 'canvas') => edit({ mode: value }),
+});
+const preview = computed(() => {
+  const image = snapshot.value.image;
+  return image ? `data:${image.mimeType};base64,${image.base64}` : '';
+});
+const attachmentFilename = computed(() => {
+  const type = snapshot.value.image?.mimeType;
+  return `practice.${type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png'}`;
+});
+const canFinalize = computed(
+  () =>
+    snapshot.value.title.trim() && (snapshot.value.attachmentKind || snapshot.value.note.trim()),
+);
 
-function readDrawing() {
-  if (mode.value !== 'canvas' || !drawingCanvasRef.value || isCanvasEmpty.value) return undefined;
-  return asDrawing(drawingCanvasRef.value.toDataURL('image/png'));
+function changed(hasDrawing: boolean) {
+  if (!hasDrawing && attachmentError.value) return;
+  if (hasDrawing || snapshot.value.attachmentKind === 'canvas')
+    edit({ image: null, attachmentKind: hasDrawing ? 'canvas' : null });
 }
-
-function download() {
-  const canvas = drawingCanvasRef.value;
-  if (!canvas || isCanvasEmpty.value) return;
-  const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png');
-  link.download = `${props.practice.id}.png`;
-  link.click();
+function allowDrawing() {
+  return (
+    snapshot.value.attachmentKind !== 'photo' ||
+    window.confirm('Заменить фотографию рисунком на холсте?')
+  );
 }
-
-function saved(_work: unknown, revision?: number) {
-  if (revision !== undefined) savedRevision.value = revision;
-  workSaved.value = true;
+async function choosePhoto(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || locked.value) return;
+  if (
+    snapshot.value.attachmentKind === 'canvas' &&
+    !window.confirm('Заменить рисунок на холсте выбранной фотографией?')
+  )
+    return;
+  const session = capture();
+  photoBusy.value = true;
+  photoError.value = '';
+  try {
+    const image = await preparePaperPhoto(file);
+    if (disposed || !isCurrent(session)) return;
+    await canvas.value?.restore(null);
+    edit({ image, attachmentKind: 'photo' });
+  } catch (reason) {
+    if (!disposed && isCurrent(session))
+      photoError.value =
+        reason instanceof Error ? reason.message : 'Не удалось подготовить фотографию.';
+  } finally {
+    photoBusy.value = false;
+  }
+}
+function confirmDiscard() {
+  if (window.confirm('Удалить черновик практики?')) void discard();
+}
+async function saveWork() {
+  canvas.value?.commitStroke();
+  if ((canFinalize.value || finalAttempt.value) && (await finish())) workSaved.value = true;
 }
 function confirmLeave() {
+  canvas.value?.commitStroke();
   return (
-    !dirty.value ||
-    window.confirm('Уйти с практики? Рисунок и подпись останутся только после сохранения в альбом.')
+    !(dirty.value || finalAttempt.value || photoBusy.value) ||
+    window.confirm('Последние изменения ещё сохраняются. Уйти с практики?')
   );
 }
 onBeforeRouteLeave(confirmLeave);
@@ -78,7 +129,8 @@ onBeforeRouteUpdate(
   (to, from) => to.params.practiceId === from.params.practiceId || confirmLeave(),
 );
 function beforeUnload(event: BeforeUnloadEvent) {
-  if (!dirty.value) return;
+  canvas.value?.commitStroke();
+  if (!dirty.value && !finalAttempt.value && !photoBusy.value) return;
   event.preventDefault();
   event.returnValue = '';
 }
@@ -140,7 +192,7 @@ async function complete() {
     </section>
 
     <div class="canvas-column">
-      <fieldset class="drawing-mode">
+      <fieldset class="drawing-mode" :disabled="locked">
         <legend>Где рисовать</legend>
         <div class="mode-options">
           <label
@@ -157,67 +209,117 @@ async function complete() {
         Подготовьте материалы и начните с первого шага. После практики можно добавить фото или
         подпись.
       </p>
-      <div v-show="mode === 'canvas'" class="canvas-area">
-        <div class="canvas-tools">
-          <label for="practice-ink">Цвет</label>
-          <input id="practice-ink" v-model="currentColor" type="color" />
-          <button
-            class="btn-outline"
-            type="button"
-            :aria-pressed="currentTool === 'pen'"
-            @click="setTool('pen')"
-          >
-            Кисть
-          </button>
-          <button
-            class="btn-outline"
-            type="button"
-            :aria-pressed="currentTool === 'eraser'"
-            @click="setTool('eraser')"
-          >
-            Ластик
-          </button>
-          <button
-            class="btn-outline"
-            type="button"
-            :disabled="isCanvasEmpty"
-            @click="clearCanvasSurface"
-          >
-            Очистить
-          </button>
-        </div>
-        <canvas
-          ref="drawingCanvasRef"
-          width="720"
-          height="450"
-          aria-label="Холст для рисования мышью или касанием"
-          @mousedown="handleMouseDown"
-          @mousemove="handleMouseMove"
-          @mouseup="handleMouseUp"
-          @mouseleave="handleMouseLeave"
-          @touchstart.prevent="handleTouchStart"
-          @touchmove.prevent="handleTouchMove"
-          @touchend.prevent="handleTouchEnd"
-          @touchcancel="handleMouseLeave"
-        >
-          Рисунок можно выполнить на бумаге.
-        </canvas>
-        <button class="btn-outline" type="button" :disabled="isCanvasEmpty" @click="download">
-          <Icon name="download" :size="17" /> Скачать рисунок
-        </button>
-      </div>
-      <details class="save-details">
+      <PracticeCanvas
+        v-show="mode === 'canvas'"
+        ref="canvas"
+        :practice-id="practice.id"
+        :disabled="locked"
+        :allow-drawing="allowDrawing"
+        @changed="changed"
+      />
+      <p v-if="!ready && !draftError" class="muted" role="status">Загружаем черновик…</p>
+      <p v-else-if="draftError" class="error" role="alert">{{ draftError }}</p>
+      <p v-else-if="syncing || dirty || committed" class="muted" role="status">
+        {{
+          syncing ? 'Сохраняем черновик…' : dirty ? 'Черновик ждёт сохранения' : 'Черновик сохранён'
+        }}
+      </p>
+      <button
+        v-if="draftError && (!ready || conflict)"
+        type="button"
+        class="btn-outline"
+        :disabled="photoBusy"
+        @click="load"
+      >
+        {{ conflict ? 'Загрузить версию с сервера' : 'Загрузить снова' }}
+      </button>
+      <button
+        v-else-if="draftError && dirty && !finalAttempt"
+        type="button"
+        class="btn-outline"
+        @click="flush"
+      >
+        Повторить автосохранение
+      </button>
+      <details v-if="ready" class="save-details">
         <summary>Сохранить рисунок или заметку</summary>
-        <SaveWorkForm
-          ref="workForm"
-          :practice-id="practice.id"
-          :initial-title="practice.title"
-          :prompt="practice.prompt"
-          :allow-photo="mode === 'paper'"
-          :read-drawing="readDrawing"
-          :drawing-revision="mode === 'canvas' ? drawingRevision : undefined"
-          @saved="saved"
-        />
+        <p v-if="attachmentError" class="error" role="alert">{{ attachmentError }}</p>
+        <form class="stack work-form" @submit.prevent="saveWork">
+          <fieldset class="stack draft-fields" :disabled="locked">
+            <legend>Данные работы</legend>
+            <label :for="`${prefix}-title`">Название</label>
+            <input
+              :id="`${prefix}-title`"
+              :value="snapshot.title"
+              required
+              maxlength="100"
+              @input="edit({ title: ($event.target as HTMLInputElement).value })"
+            />
+            <label :for="`${prefix}-note`">Подпись к работе</label>
+            <textarea
+              :id="`${prefix}-note`"
+              :value="snapshot.note"
+              rows="3"
+              :maxlength="captionLimit"
+              @input="edit({ note: ($event.target as HTMLTextAreaElement).value })"
+            />
+            <template v-if="mode === 'paper'">
+              <label :for="`${prefix}-photo`">Фото работы на бумаге</label>
+              <input
+                :id="`${prefix}-photo`"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                @change="choosePhoto"
+              />
+            </template>
+          </fieldset>
+          <p v-if="photoError" class="error" role="alert">{{ photoError }}</p>
+          <figure v-if="preview" class="draft-preview">
+            <img
+              :src="preview"
+              :alt="snapshot.attachmentKind === 'photo' ? 'Фото работы' : 'Рисунок на холсте'"
+            />
+            <figcaption>Вложение для альбома</figcaption>
+            <a class="btn-outline" :href="preview" :download="attachmentFilename">
+              Скачать вложение
+            </a>
+          </figure>
+          <div v-else-if="snapshot.attachmentKind === 'canvas'" class="draft-preview">
+            <p>Вложение для альбома — рисунок на холсте.</p>
+            <button type="button" class="btn-outline" @click="canvas?.download()">
+              Скачать вложение
+            </button>
+          </div>
+          <div class="session-actions">
+            <button
+              class="btn-primary"
+              :disabled="
+                (!canFinalize && !finalAttempt) ||
+                conflict ||
+                finalizing ||
+                photoBusy ||
+                Boolean(attachmentError)
+              "
+            >
+              {{
+                finalizing
+                  ? 'Сохраняем…'
+                  : finalAttempt
+                    ? 'Проверить сохранение'
+                    : 'Сохранить работу'
+              }}
+            </button>
+            <button
+              v-if="dirty || committed"
+              type="button"
+              class="btn-outline"
+              :disabled="locked || conflict"
+              @click="confirmDiscard"
+            >
+              Удалить черновик
+            </button>
+          </div>
+        </form>
       </details>
       <p v-if="workSaved" class="saved-status" role="status">
         Работа сохранена в личном альбоме.
@@ -247,7 +349,6 @@ async function complete() {
   font-weight: 600;
 }
 .session-actions,
-.canvas-tools,
 .mode-options {
   display: flex;
   flex-wrap: wrap;
@@ -278,29 +379,28 @@ async function complete() {
 .mode-options input {
   width: auto;
 }
-.canvas-area {
-  display: grid;
-  gap: var(--space-3);
+.draft-fields {
+  border: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
 }
-.canvas-area canvas {
+.draft-fields legend {
+  font-weight: 650;
+}
+.draft-fields input[type='file'] {
+  max-inline-size: 100%;
+}
+.draft-preview {
+  margin: 0;
+}
+.draft-preview img {
   display: block;
+  max-inline-size: 12rem;
   width: 100%;
-  height: auto;
-  background: #fff;
-  border-radius: var(--radius-sm);
-  touch-action: none;
-  cursor: crosshair;
-}
-.canvas-area > button {
-  justify-self: start;
-}
-.canvas-tools input {
-  width: 2.75rem;
-  height: 2.75rem;
-  padding: var(--space-1);
-}
-.canvas-tools [aria-pressed='true'] {
-  background: var(--accent-soft);
+  max-block-size: 10rem;
+  object-fit: contain;
+  background: white;
 }
 .save-details {
   border-top: 1px solid var(--border-color);

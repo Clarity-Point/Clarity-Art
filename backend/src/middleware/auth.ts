@@ -86,6 +86,12 @@ export function requireExpectedUser(req: AuthRequest, res: Response, next: NextF
   next();
 }
 
+export function requireAccountContext(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.get('X-Expected-User-Id'))
+    return res.status(400).json({ error: 'Требуется идентификатор открытого аккаунта.' });
+  return requireExpectedUser(req, res, next);
+}
+
 export function sendAIConsentRequired(res: Response) {
   return res.status(412).json({
     error: 'Для внешнего AI-провайдера требуется явное согласие в настройках профиля',

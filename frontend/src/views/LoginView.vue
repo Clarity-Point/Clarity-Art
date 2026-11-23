@@ -59,10 +59,18 @@
         </form>
 
         <p class="auth-switch muted">
-          Нет аккаунта? <router-link to="/register">Зарегистрироваться</router-link>
+          Нет аккаунта?
+          <router-link
+            :to="{
+              name: 'register',
+              query: route.query.redirect ? { redirect: route.query.redirect } : {},
+            }"
+            >Зарегистрироваться</router-link
+          >
         </p>
         <p class="auth-switch">
           <RouterLink to="/practice-cards">Печатные карточки для практик</RouterLink>
+          <RouterLink class="btn-outline" to="/practice-demo">Попробовать на холсте</RouterLink>
         </p>
       </div>
     </div>

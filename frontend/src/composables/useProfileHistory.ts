@@ -1,7 +1,8 @@
-import { ref } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { useUserProfileStore } from '@/stores/userProfileStore';
 import { storeToRefs } from 'pinia';
 import axios from 'axios';
+import { usePracticeApi } from '@/features/practices/api';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -51,4 +52,81 @@ export function useProfileHistory() {
     formatDate,
     toggleImagePublic,
   };
+}
+
+type ChatSessions = Array<Array<{ text: string; sender: 'user' | 'ИИ'; timestamp?: string }>>;
+
+export function useProfileChats(isHistoryVisible: () => boolean) {
+  const { auth, capture, isCurrent, request } = usePracticeApi();
+  const sessions = ref<ChatSessions>();
+  const truncated = ref(false);
+  const busy = ref(false);
+  const error = ref('');
+  let generation = 0;
+
+  async function load() {
+    const session = capture();
+    if (!session.id || busy.value) return;
+    const current = ++generation;
+    busy.value = true;
+    error.value = '';
+    try {
+      let history;
+      try {
+        history = await request<{ sessions: ChatSessions; truncated: boolean }>(
+          session,
+          '/profile/chat-history',
+        );
+      } catch (reason) {
+        if (!axios.isAxiosError(reason) || reason.response?.status !== 404 || !isCurrent(session))
+          throw reason;
+        const legacy = await request<{
+          id: string;
+          chatSessions: ChatSessions;
+          dataTruncated?: { chats?: boolean };
+        }>(session, '/profile');
+        if (legacy.id !== session.id) {
+          auth.expireSession();
+          void auth.restoreSession();
+          return;
+        }
+        history = {
+          sessions: legacy.chatSessions,
+          truncated: Boolean(legacy.dataTruncated?.chats),
+        };
+      }
+      if (current !== generation || !isCurrent(session)) return;
+      sessions.value = Array.isArray(history.sessions) ? history.sessions : [];
+      truncated.value = history.truncated;
+    } catch {
+      if (current === generation && isCurrent(session))
+        error.value = 'Не удалось загрузить историю чатов.';
+    } finally {
+      if (current === generation && isCurrent(session)) busy.value = false;
+    }
+  }
+
+  watch(
+    () => [auth.user?.id, auth.sessionRevision],
+    () => {
+      generation++;
+      sessions.value = undefined;
+      truncated.value = false;
+      busy.value = false;
+      error.value = '';
+      if (isHistoryVisible()) void load();
+    },
+    { flush: 'sync' },
+  );
+  watch(
+    isHistoryVisible,
+    (visible) => {
+      if (visible && !sessions.value) void load();
+    },
+    { immediate: true },
+  );
+  onBeforeUnmount(() => {
+    generation++;
+  });
+  return { sessions, truncated, busy, error, load };
 }

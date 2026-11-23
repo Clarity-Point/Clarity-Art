@@ -210,6 +210,28 @@ async function revoke(share: OutgoingShare) {
   }
 }
 
+async function updateRecommendation(share: OutgoingShare, disable: boolean) {
+  if (busy.value || mutating.value) return;
+  const session = capture();
+  const operation = disable ? 'recommendation-permission' : 'recommendation/dismissal';
+  mutating.value = true;
+  actionError.value = '';
+  try {
+    await request(session, `/practices/shares/${share.id}/${operation}`, {
+      method: 'PUT',
+      data: disable ? { allowed: false } : undefined,
+    });
+    share.recommendedPracticeId = null;
+    if (disable) share.allowRecommendation = false;
+    status.value = disable ? 'Рекомендации для подборки отключены.' : 'Рекомендация скрыта.';
+  } catch (reason) {
+    if (isCurrent(session))
+      actionError.value = practiceError(reason, 'Не удалось обновить рекомендацию.');
+  } finally {
+    if (isCurrent(session)) mutating.value = false;
+  }
+}
+
 async function shared() {
   sharing.value = false;
   status.value = 'Специалист получил доступ к подборке.';
@@ -349,6 +371,32 @@ async function shared() {
               }}</strong>
               <p>{{ share.items.map((item) => item.title).join(', ') }}</p>
               <time :datetime="share.createdAt">{{ practiceDate(share.createdAt) }}</time>
+              <p v-if="share.acknowledgedAt">Специалист отметил подборку как просмотренную.</p>
+              <div v-if="share.recommendedPracticeId" class="album-actions">
+                <RouterLink
+                  class="btn-outline"
+                  :to="{ name: 'practices', params: { practiceId: share.recommendedPracticeId } }"
+                >
+                  Открыть предложенную практику
+                </RouterLink>
+                <button
+                  type="button"
+                  class="btn-outline"
+                  :disabled="busy || mutating"
+                  @click="updateRecommendation(share, false)"
+                >
+                  Скрыть рекомендацию
+                </button>
+              </div>
+              <button
+                v-if="share.allowRecommendation"
+                type="button"
+                class="btn-outline"
+                :disabled="busy || mutating"
+                @click="updateRecommendation(share, true)"
+              >
+                Отключить рекомендации
+              </button>
             </div>
             <button
               class="btn-outline"

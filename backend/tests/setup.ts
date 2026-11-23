@@ -5,3 +5,7 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-not-a-placeholder';
 // Enable the real (mocked) AI code path.
 process.env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || 'test-openrouter-key';
+
+process.env.AI_PROVIDER_LABEL = 'Test provider';
+process.env.AI_PROVIDER_POLICY_REVISION = 'test-policy-1';
+process.env.PRACTICE_FEEDBACK_NOTIFICATIONS = 'true';

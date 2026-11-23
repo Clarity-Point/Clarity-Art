@@ -52,6 +52,12 @@ onMounted(load);
         >
           Все карточки
         </RouterLink>
+        <RouterLink
+          v-if="cards.some(({ id }) => id === 'two-lines')"
+          class="btn-outline"
+          to="/practice-demo"
+          >Попробовать на холсте</RouterLink
+        >
         <RouterLink class="btn-outline" to="/practices">В приложение</RouterLink>
       </div>
     </header>

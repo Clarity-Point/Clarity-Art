@@ -72,6 +72,53 @@ describe.runIf(process.env.RUN_DATABASE_TESTS === 'true')(
       await prisma.course.deleteMany({ where: { id: courseId } });
       await prisma.$disconnect();
     });
+    it('loads private recent chat history separately from the compatible full profile', async () => {
+      await prisma.profile.create({ data: { userId: owner, name: 'History owner fixture' } });
+      const chat = await prisma.chatSession.create({ data: { userId: owner, tags: [] } });
+      const privateContent = 'Private synthetic chat '.repeat(2048);
+      await prisma.chatMessage.create({
+        data: { sessionId: chat.id, role: 'user', content: privateContent },
+      });
+      try {
+        const full = await request(app)
+          .get('/api/profile')
+          .set('Cookie', cookie(owner))
+          .expect(200);
+        const summary = await request(app)
+          .get('/api/profile?view=summary')
+          .set('Cookie', cookie(owner))
+          .expect(200);
+        expect(full.body.chatSessions[0][0].text).toBe(privateContent);
+        expect(summary.body).toMatchObject({
+          id: owner,
+          chatSessions: [],
+          courseProgress: full.body.courseProgress,
+        });
+        expect(summary.text.length).toBeLessThan(full.text.length / 5);
+        const history = '/api/profile/chat-history';
+        await request(app).get(history).set('Cookie', cookie(owner)).expect(400);
+        await request(app)
+          .get(history)
+          .set('Cookie', cookie(other))
+          .set('X-Expected-User-Id', owner)
+          .expect(409);
+        await request(app)
+          .get(history)
+          .set('Cookie', cookie(other))
+          .set('X-Expected-User-Id', other)
+          .expect(200, { truncated: false, sessions: [] });
+        await request(app)
+          .get(history)
+          .set('Cookie', cookie(owner))
+          .set('X-Expected-User-Id', owner)
+          .expect('Cache-Control', 'no-store')
+          .expect(200, { truncated: false, sessions: full.body.chatSessions });
+      } finally {
+        await prisma.chatSession.delete({ where: { id: chat.id } });
+        await prisma.profile.delete({ where: { userId: owner } });
+      }
+    });
+
     it('enforces draft ownership and allows exactly one concurrent version update', async () => {
       const url = '/api/drafts/diary/new';
       expect(
